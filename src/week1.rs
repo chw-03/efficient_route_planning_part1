@@ -54,22 +54,25 @@ pub fn cost_calc(head: Coordinate, tail: Coordinate, way_tags: Vec<Tag>) -> f64 
 }
 
 impl RoadNetwork {
-    pub fn new(path: &str) -> Self {
-        let osm: Osm = Self::read_from_osm_file(path).unwrap();
+    pub fn new(osm: Osm) -> Self {
         let now = Instant::now();
         let nodes = osm.nodes;
         let ways = osm.ways;
         let mut outgoing_arcs: Vec<Vec<Option<Edge>>> = Vec::new();
-        for n in 0..nodes.len() {
+        for n in 1..nodes.len() {
             let adjacent_edges: Vec<Option<Edge>> = ways
                 .iter()
                 .map(|way| {
-                    let pos = way.refs.iter().position(|&m| m == nodes[n].id);
+                    let pos = way.refs.iter().position(|&m| m == nodes[n-1].id);
                     if pos.is_some() {
-                        let index = way.refs[pos.unwrap() + 1];
+                        let index = pos.unwrap() + 1;
+                        if index > way.refs.len() {
+                            return None;
+                        }
+                        let target = way.refs[index];
                         let head = nodes
                             .iter()
-                            .find(|node: &&Node| node.id == index)
+                            .find(|node: &&Node| node.id == target)
                             .unwrap()
                             .clone();
                         let cost =
@@ -104,7 +107,8 @@ mod tests {
 
     #[test]
     fn run_the_thing() {
-        let result = RoadNetwork::new("saarland.osm");
+        let osm = RoadNetwork::read_from_osm_file("saarland.osm").unwrap();
+        let result = RoadNetwork::new(osm);
         print!(
             "#nodes: {}, #arcs: {}",
             result.nodes.len(),
