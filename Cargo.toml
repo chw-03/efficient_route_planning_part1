@@ -1,0 +1,13 @@
+[package]
+name = "bast-homework"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+vadeen_osm = "0.4.2"
+
+[[bin]]
+name = "week1"
+path = "src/week1.rs"
