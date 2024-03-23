@@ -1,4 +1,3 @@
-use vadeen_osm::geo::Coordinate;
 /*
 Implement a simple class RoadNetwork for an undirected graph with arc costs.
 Add a method readFromOsmFile to your class that reads an OSM file (in XML format) and
@@ -9,7 +8,8 @@ and nodes in your graphs, and any other information asked for there.
 */
 use std::time::Instant;
 use vadeen_osm::osm_io::{error::Error as osm_err, read};
-use vadeen_osm::*;
+use vadeen_osm::{Osm, Node, Tag};
+use vadeen_osm::geo::Coordinate;
 
 #[derive(Debug, PartialEq)]
 pub struct RoadNetwork {
@@ -60,13 +60,14 @@ impl RoadNetwork {
         let ways = osm.ways;
         let mut outgoing_arcs: Vec<Vec<Option<Edge>>> = Vec::new();
         for n in 1..nodes.len() {
+            println!("{}", n);
             let adjacent_edges: Vec<Option<Edge>> = ways
                 .iter()
                 .map(|way| {
                     let pos = way.refs.iter().position(|&m| m == nodes[n-1].id);
                     if pos.is_some() {
                         let index = pos.unwrap() + 1;
-                        if index > way.refs.len() {
+                        if index >= way.refs.len() {
                             return None;
                         }
                         let target = way.refs[index];
@@ -89,10 +90,9 @@ impl RoadNetwork {
         RoadNetwork {
             nodes,
             outgoing_arcs,
-            //osm.ways transformed into the edge thing i just wrote up there it should get the head node (the destination) and the costs caluclatd using cost_calc
-            //need to figure out where to get edclid distance from like start node to this one???
         }
     }
+    
     pub fn read_from_osm_file(path: &str) -> Result<Osm, osm_err> {
         let now = Instant::now();
         let osm = read(path)?;
