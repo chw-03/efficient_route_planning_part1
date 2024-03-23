@@ -68,9 +68,10 @@ impl RoadNetwork {
     pub fn new(path: &str) -> Self {
         let osm = Self::read_from_osm_file(path);
         RoadNetwork {
-            data,
-            nodes,
-            edges,
+            data, //osm results
+            nodes, //osm.nodes
+            edges, //osm.ways transformed into the edge thing i just wrote up there it should get the head node (the destination) and the costs caluclatd using cost_calc 
+            //need to figure out where to get edclid distance from like start node to this one???
         }
     }
     pub fn read_from_osm_file(path: &str) -> Result<Osm, osm_err> {
