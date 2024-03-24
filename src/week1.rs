@@ -17,16 +17,10 @@ pub struct Way {
 #[derive(Debug, PartialEq)]
 pub struct RoadNetwork {
     nodes: HashMap<i64, Node>,
-    outgoing_arcs: Vec<Vec<Option<Edge>>>,
+    edges: HashMap<i64, HashMap<i64,u32>>, // hash < tail.id hash < head.id, cost>
 }
 
-#[derive(Debug, PartialEq)]
-pub struct Edge {
-    head: Node, //destination
-    cost: f64,
-}
-
-pub fn cost_calc(head: Node, tail: Node, way: &Way) -> f64 {
+pub fn cost_calc(head: Node, tail: Node, way: &Way) -> u32 {
     let road_type = way.tags.iter().find(|(k, _v)| k.eq(&"highway"));
     let road_type = match road_type {
         Some((_k, v)) => v.as_str(),
@@ -53,47 +47,42 @@ pub fn cost_calc(head: Node, tail: Node, way: &Way) -> f64 {
     };
     let distance =
         f64::sqrt((i64::pow(head.lat - tail.lat, 2) + i64::pow(head.lon - tail.lon, 2)) as f64);
-    distance / (kmh as f64)
+    (distance / (kmh as f64)) as u32
 }
 
 impl RoadNetwork {
     pub fn new(nodes: HashMap<i64, Node>, ways: Vec<Way>) -> Self {
         println!("Construct start");
         let now = Instant::now();
-        let mut outgoing_arcs: Vec<Vec<Option<Edge>>> = Vec::new();
-        let node_iter = nodes.iter();
-        //println!("{}",);
-        for k in node_iter {
-            let adjacent_edges: Vec<Option<Edge>> = ways
-                .iter()
-                .map(|way| {
-                    let pos = way.refs.iter().position(|m| m == k.0);
-                    if pos.is_some() {
-                        let index = pos.unwrap() + 1;
-                        if index >= way.refs.len() {
-                            return None;
-                        }
-                        let target = way.refs.iter().nth(index);
-                        match target {
-                            Some(target) => {
-                                let head = nodes.get(&target).unwrap();
-                                let cost = cost_calc(*head, *k.1, way);
-                                Some(Edge { head: *head, cost })
-                            }
-                            None => None,
-                        }
-                    } 
-                    else {
-                        None
-                    }
-                })
-                .collect();
-            outgoing_arcs.push(adjacent_edges);
+        let mut edges: HashMap<i64, HashMap<i64,u32>> = HashMap::new();
+        let mut counter = nodes.len();
+        for way in ways {
+            println!("{}", counter);
+            counter = counter - 1;
+            let mut parse = way.refs.iter();
+            for i in 0..way.refs.len() - 1 {
+                let tail_id = parse.nth(i).unwrap();
+                let tail = nodes.get(tail_id);
+                let head_id = parse.nth(i+1).unwrap();
+                let head = nodes.get(head_id);
+                if let (Some(tail), Some(head)) = (tail, head) {
+                    let cost = cost_calc(*head, *tail, &way);
+                    edges.entry(*tail_id)
+                    .and_modify(|inner| {inner.insert(*head_id, cost);})
+                    .or_insert({
+                        let mut a = HashMap::new();
+                        a.insert(*head_id, cost);
+                        a
+                    });
+                    
+                }
+                
+            }
         }
-        println!("Construct time: {}", now.elapsed().as_secs());
+        println!("Construct time: {}", now.elapsed().as_secs_f32());
         Self {
             nodes,
-            outgoing_arcs,
+            edges,
         }
     }
 
@@ -122,15 +111,15 @@ impl RoadNetwork {
                     e.id(),
                     Node {
                         id: e.id(),
-                        lat: (e.lat() * f64::powi(10.0, 7)) as i64,
-                        lon: (e.lon() * f64::powi(10.0, 7)) as i64,
+                        lat: (e.lat() * f64::powi(10.0, 7)) as i64, //remember to backconvert when pulling val
+                        lon: (e.lon() * f64::powi(10.0, 7)) as i64, //remember to backconvert when pulling val
                     },
                 );
                 return ();
             }
             _ => (),
         });
-        println!("Reading time {}", now.elapsed().as_secs());
+        println!("Reading time {}", now.elapsed().as_secs_f32());
         Some((nodes, ways))
     }
 }
@@ -142,21 +131,17 @@ mod tests {
     #[test]
     fn cmon_do_something() {
         let data = RoadNetwork::read_from_osm_file("saarland_01.pbf").unwrap();
-        println!(
-            "Nodes: {}, Ways: {}",
-            data.0.len(),
-            data.1.len()
-        );
+        println!("Nodes: {}, Ways: {}", data.0.len(), data.1.len());
     }
 
     #[test]
-    fn constructing_roadnet(){
+    fn constructing_roadnet() {
         let data = RoadNetwork::read_from_osm_file("saarland_01.pbf").unwrap();
         let roads = RoadNetwork::new(data.0, data.1);
         println!(
             "Nodes: {}, Edges: {}",
             roads.nodes.len(),
-            roads.outgoing_arcs.len()
+            roads.edges.len()
         );
     }
 }
