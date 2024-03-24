@@ -68,15 +68,23 @@ impl RoadNetwork {
                 .iter()
                 .map(|way| {
                     let pos = way.refs.iter().position(|m| m == k.0);
-                    let index = pos.unwrap() + 1;
-                    let node_ref = way.refs.iter().nth(index);
-                    match node_ref {
-                        Some(node_ref) => {
-                            let head = nodes.get(&node_ref).unwrap();
-                            let cost = cost_calc(*head, *k.1, way);
-                            Some(Edge { head: *head, cost })
+                    if pos.is_some() {
+                        let index = pos.unwrap() + 1;
+                        if index >= way.refs.len() {
+                            return None;
                         }
-                        None => None,
+                        let target = way.refs.iter().nth(index);
+                        match target {
+                            Some(target) => {
+                                let head = nodes.get(&target).unwrap();
+                                let cost = cost_calc(*head, *k.1, way);
+                                Some(Edge { head: *head, cost })
+                            }
+                            None => None,
+                        }
+                    } 
+                    else {
+                        None
                     }
                 })
                 .collect();
