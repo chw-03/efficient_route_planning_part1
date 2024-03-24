@@ -17,7 +17,7 @@ pub struct Way {
 #[derive(Debug, PartialEq)]
 pub struct RoadNetwork {
     nodes: HashMap<i64, Node>,
-    edges: HashMap<i64, HashMap<i64,u32>>, // hash < tail.id hash < head.id, cost>
+    edges: HashMap<i64, HashMap<i64, u32>>, // hash < tail.id hash < head.id, cost>
 }
 
 pub fn cost_calc(head: Node, tail: Node, way: &Way) -> u32 {
@@ -54,7 +54,7 @@ impl RoadNetwork {
     pub fn new(nodes: HashMap<i64, Node>, ways: Vec<Way>) -> Self {
         println!("Construct start");
         let now = Instant::now();
-        let mut edges: HashMap<i64, HashMap<i64,u32>> = HashMap::new();
+        let mut edges: HashMap<i64, HashMap<i64, u32>> = HashMap::new();
         let mut counter = nodes.len();
         for way in ways {
             println!("{}", counter);
@@ -63,27 +63,25 @@ impl RoadNetwork {
             for i in 0..way.refs.len() - 1 {
                 let tail_id = parse.nth(i).unwrap();
                 let tail = nodes.get(tail_id);
-                let head_id = parse.nth(i+1).unwrap();
+                let head_id = parse.nth(i + 1).unwrap();
                 let head = nodes.get(head_id);
                 if let (Some(tail), Some(head)) = (tail, head) {
                     let cost = cost_calc(*head, *tail, &way);
-                    edges.entry(*tail_id)
-                    .and_modify(|inner| {inner.insert(*head_id, cost);})
-                    .or_insert({
-                        let mut a = HashMap::new();
-                        a.insert(*head_id, cost);
-                        a
-                    });
-                    
+                    edges
+                        .entry(*tail_id)
+                        .and_modify(|inner| {
+                            inner.insert(*head_id, cost);
+                        })
+                        .or_insert({
+                            let mut a = HashMap::new();
+                            a.insert(*head_id, cost);
+                            a
+                        });
                 }
-                
             }
         }
         println!("Construct time: {}", now.elapsed().as_secs_f32());
-        Self {
-            nodes,
-            edges,
-        }
+        Self { nodes, edges }
     }
 
     pub fn read_from_osm_file(path: &str) -> Option<(HashMap<i64, Node>, Vec<Way>)> {
@@ -138,11 +136,7 @@ mod tests {
     fn constructing_roadnet() {
         let data = RoadNetwork::read_from_osm_file("saarland_01.pbf").unwrap();
         let roads = RoadNetwork::new(data.0, data.1);
-        println!(
-            "Nodes: {}, Edges: {}",
-            roads.nodes.len(),
-            roads.edges.len()
-        );
+        println!("Nodes: {}, Edges: {}", roads.nodes.len(), roads.edges.len());
     }
 }
 
