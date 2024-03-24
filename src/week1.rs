@@ -62,6 +62,7 @@ impl RoadNetwork {
         let now = Instant::now();
         let mut outgoing_arcs: Vec<Vec<Option<Edge>>> = Vec::new();
         let node_iter = nodes.iter();
+        //println!("{}",);
         for k in node_iter {
             let adjacent_edges: Vec<Option<Edge>> = ways
                 .iter()
@@ -93,6 +94,7 @@ impl RoadNetwork {
         let now = Instant::now();
         let reader = ElementReader::from_path(path).ok()?;
         let mut nodes = HashMap::new();
+        //nodes.insert(3, Node{id:11, lat:11, lon:11});
         let mut ways = Vec::new();
         let _ = reader.for_each(|e: Element<'_>| match e {
             Element::Way(e) => ways.push(Way {
@@ -103,7 +105,11 @@ impl RoadNetwork {
                     .collect(),
                 refs: e.raw_refs().to_vec(),
             }),
-            Element::Node(e) => {
+            _ => (),
+        });
+        let reader = ElementReader::from_path(path).ok()?;
+        let _ = reader.for_each(|e: Element<'_>| match e {
+            Element::DenseNode(e) => {
                 nodes.insert(
                     e.id(),
                     Node {
@@ -127,6 +133,16 @@ mod tests {
 
     #[test]
     fn cmon_do_something() {
+        let data = RoadNetwork::read_from_osm_file("saarland_01.pbf").unwrap();
+        println!(
+            "Nodes: {}, Ways: {}",
+            data.0.len(),
+            data.1.len()
+        );
+    }
+
+    #[test]
+    fn constructing_roadnet(){
         let data = RoadNetwork::read_from_osm_file("saarland_01.pbf").unwrap();
         let roads = RoadNetwork::new(data.0, data.1);
         println!(
