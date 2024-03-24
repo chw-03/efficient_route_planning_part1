@@ -1,19 +1,22 @@
-/*
-Implement a simple class RoadNetwork for an undirected graph with arc costs.
-Add a method readFromOsmFile to your class that reads an OSM file (in XML format) and
-constructs the corresponding road network. Translate the road types to speeds.
-Read the OSM files for Saarland and Baden-Wurttemberg.
-Add a line to the table linked to from the course Wiki, stating your name, the number of arcs
-and nodes in your graphs, and any other information asked for there.
-*/
-use std::time::Instant;
-use vadeen_osm::osm_io::{error::Error as osm_err, read};
-use vadeen_osm::{Osm, Node, Tag};
-use vadeen_osm::geo::Coordinate;
+use osmpbf::*;
+use std::{collections::HashMap, time::Instant};
+
+#[derive(Debug, PartialEq, Hash, Eq, Clone, Copy)]
+pub struct Node {
+    id: i64,
+    lat: i64,
+    lon: i64,
+}
+#[derive(Debug, PartialEq, Hash, Eq)]
+pub struct Way {
+    id: i64,
+    tags: Vec<(String, String)>,
+    refs: Vec<i64>,
+}
 
 #[derive(Debug, PartialEq)]
 pub struct RoadNetwork {
-    nodes: Vec<Node>,
+    nodes: HashMap<i64, Node>,
     outgoing_arcs: Vec<Vec<Option<Edge>>>,
 }
 
@@ -23,14 +26,14 @@ pub struct Edge {
     cost: f64,
 }
 
-pub fn cost_calc(head: Coordinate, tail: Coordinate, way_tags: Vec<Tag>) -> f64 {
-    let road_type = way_tags.into_iter().find(|k| k.key.eq(&"highway"));
-    let road_type = match road_type.clone() {
-        Some(tag) => tag.value,
-        None => "".to_owned(),
+pub fn cost_calc(head: Node, tail: Node, way: &Way) -> f64 {
+    let road_type = way.tags.iter().find(|(k, _v)| k.eq(&"highway"));
+    let road_type = match road_type {
+        Some((_k, v)) => v.as_str(),
+        None => "",
     };
 
-    let kmh = match road_type.as_str() {
+    let kmh = match road_type {
         "motorway" => 110,
         "trunk" => 110,
         "primary" => 70,
@@ -49,55 +52,72 @@ pub fn cost_calc(head: Coordinate, tail: Coordinate, way_tags: Vec<Tag>) -> f64 
         _ => 0,
     };
     let distance =
-        f64::sqrt(f64::powi(head.lat() - tail.lat(), 2) + f64::powi(head.lon() - tail.lon(), 2));
+        f64::sqrt((i64::pow(head.lat - tail.lat, 2) + i64::pow(head.lon - tail.lon, 2)) as f64);
     distance / (kmh as f64)
 }
 
 impl RoadNetwork {
-    pub fn new(osm: Osm) -> Self {
+    pub fn new(nodes: HashMap<i64, Node>, ways: Vec<Way>) -> Self {
+        println!("Construct start");
         let now = Instant::now();
-        let nodes = osm.nodes;
-        let ways = osm.ways;
         let mut outgoing_arcs: Vec<Vec<Option<Edge>>> = Vec::new();
-        for n in 1..nodes.len() {
-            println!("{}", n);
+        let node_iter = nodes.iter();
+        for k in node_iter {
             let adjacent_edges: Vec<Option<Edge>> = ways
                 .iter()
                 .map(|way| {
-                    let pos = way.refs.iter().position(|&m| m == nodes[n-1].id);
-                    if pos.is_some() {
-                        let index = pos.unwrap() + 1;
-                        if index >= way.refs.len() {
-                            return None;
+                    let pos = way.refs.iter().position(|m| m == k.0);
+                    let index = pos.unwrap() + 1;
+                    let node_ref = way.refs.iter().nth(index);
+                    match node_ref {
+                        Some(node_ref) => {
+                            let head = nodes.get(&node_ref).unwrap();
+                            let cost = cost_calc(*head, *k.1, way);
+                            Some(Edge { head: *head, cost })
                         }
-                        let target = way.refs[index];
-                        let head = nodes
-                            .iter()
-                            .find(|node: &&Node| node.id == target)
-                            .unwrap()
-                            .clone();
-                        let cost =
-                            cost_calc(head.coordinate, nodes[n].coordinate, way.meta.tags.clone());
-                        Some(Edge { head, cost })
-                    } else {
-                        None
+                        None => None,
                     }
                 })
                 .collect();
             outgoing_arcs.push(adjacent_edges);
         }
         println!("Construct time: {}", now.elapsed().as_secs());
-        RoadNetwork {
+        Self {
             nodes,
             outgoing_arcs,
         }
     }
-    
-    pub fn read_from_osm_file(path: &str) -> Result<Osm, osm_err> {
+
+    pub fn read_from_osm_file(path: &str) -> Option<(HashMap<i64, Node>, Vec<Way>)> {
+        println!("Reading start");
         let now = Instant::now();
-        let osm = read(path)?;
+        let reader = ElementReader::from_path(path).ok()?;
+        let mut nodes = HashMap::new();
+        let mut ways = Vec::new();
+        let _ = reader.for_each(|e: Element<'_>| match e {
+            Element::Way(e) => ways.push(Way {
+                id: e.id(),
+                tags: e
+                    .tags()
+                    .map(|(a, b)| (a.to_string(), b.to_string()))
+                    .collect(),
+                refs: e.raw_refs().to_vec(),
+            }),
+            Element::Node(e) => {
+                nodes.insert(
+                    e.id(),
+                    Node {
+                        id: e.id(),
+                        lat: (e.lat() * f64::powi(10.0, 7)) as i64,
+                        lon: (e.lon() * f64::powi(10.0, 7)) as i64,
+                    },
+                );
+                return ();
+            }
+            _ => (),
+        });
         println!("Reading time {}", now.elapsed().as_secs());
-        Ok(osm)
+        Some((nodes, ways))
     }
 }
 
@@ -106,13 +126,13 @@ mod tests {
     use crate::RoadNetwork;
 
     #[test]
-    fn run_the_thing() {
-        let osm = RoadNetwork::read_from_osm_file("saarland.osm").unwrap();
-        let result = RoadNetwork::new(osm);
-        print!(
-            "#nodes: {}, #arcs: {}",
-            result.nodes.len(),
-            result.outgoing_arcs.len()
+    fn cmon_do_something() {
+        let data = RoadNetwork::read_from_osm_file("saarland_01.pbf").unwrap();
+        let roads = RoadNetwork::new(data.0, data.1);
+        println!(
+            "Nodes: {}, Edges: {}",
+            roads.nodes.len(),
+            roads.outgoing_arcs.len()
         );
     }
 }
