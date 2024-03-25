@@ -1,4 +1,4 @@
-use osmpbf::*;
+use osmpbfreader::objects::OsmObj;
 use std::{collections::HashMap, time::Instant};
 
 #[derive(Debug, PartialEq, Hash, Eq, Clone, Copy)]
@@ -10,7 +10,7 @@ pub struct Node {
 #[derive(Debug, PartialEq, Hash, Eq)]
 pub struct Way {
     id: i64,
-    tags: Vec<(String, String)>,
+    road_type: String,
     refs: Vec<i64>,
 }
 
@@ -20,14 +20,8 @@ pub struct RoadNetwork {
     edges: HashMap<i64, HashMap<i64, u32>>, // hash < tail.id hash < head.id, cost>
 }
 
-pub fn cost_calc(head: Node, tail: Node, way: &Way) -> u32 {
-    let road_type = way.tags.iter().find(|(k, _v)| k.eq(&"highway"));
-    let road_type = match road_type {
-        Some((_k, v)) => v.as_str(),
-        None => "",
-    };
-
-    let kmh = match road_type {
+pub fn cost_calc(head: Node, tail: Node, road_type: &String) -> u32 {
+    let kmh = match road_type.as_str() {
         "motorway" => 110,
         "trunk" => 110,
         "primary" => 70,
@@ -55,26 +49,25 @@ impl RoadNetwork {
         println!("Construct start");
         let now = Instant::now();
         let mut edges: HashMap<i64, HashMap<i64, u32>> = HashMap::new();
-        let mut counter = nodes.len();
+        let mut counter = ways.len();
         for way in ways {
             println!("{}", counter);
             counter = counter - 1;
-            let mut parse = way.refs.iter();
-            for i in 0..way.refs.len() - 1 {
-                let tail_id = parse.nth(i).unwrap();
-                let tail = nodes.get(tail_id);
-                let head_id = parse.nth(i + 1).unwrap();
-                let head = nodes.get(head_id);
+            for i in 0..way.refs.len()-1 {
+                let tail_id = way.refs[i];
+                let tail = nodes.get(&tail_id);
+                let head_id = way.refs[i+1];
+                let head = nodes.get(&head_id);
                 if let (Some(tail), Some(head)) = (tail, head) {
-                    let cost = cost_calc(*head, *tail, &way);
+                    let cost = cost_calc(*head, *tail, &way.road_type);
                     edges
-                        .entry(*tail_id)
+                        .entry(tail_id)
                         .and_modify(|inner| {
-                            inner.insert(*head_id, cost);
+                            inner.insert(head_id, cost);
                         })
                         .or_insert({
                             let mut a = HashMap::new();
-                            a.insert(*head_id, cost);
+                            a.insert(head_id, cost);
                             a
                         });
                 }
@@ -87,37 +80,40 @@ impl RoadNetwork {
     pub fn read_from_osm_file(path: &str) -> Option<(HashMap<i64, Node>, Vec<Way>)> {
         println!("Reading start");
         let now = Instant::now();
-        let reader = ElementReader::from_path(path).ok()?;
         let mut nodes = HashMap::new();
-        //nodes.insert(3, Node{id:11, lat:11, lon:11});
         let mut ways = Vec::new();
-        let _ = reader.for_each(|e: Element<'_>| match e {
-            Element::Way(e) => ways.push(Way {
-                id: e.id(),
-                tags: e
-                    .tags()
-                    .map(|(a, b)| (a.to_string(), b.to_string()))
-                    .collect(),
-                refs: e.raw_refs().to_vec(),
-            }),
-            _ => (),
-        });
-        let reader = ElementReader::from_path(path).ok()?;
-        let _ = reader.for_each(|e: Element<'_>| match e {
-            Element::DenseNode(e) => {
-                nodes.insert(
-                    e.id(),
-                    Node {
-                        id: e.id(),
-                        lat: (e.lat() * f64::powi(10.0, 7)) as i64, //remember to backconvert when pulling val
-                        lon: (e.lon() * f64::powi(10.0, 7)) as i64, //remember to backconvert when pulling val
-                    },
-                );
-                return ();
-            }
-            _ => (),
-        });
+        let path_cleaned = std::path::Path::new(&path);
+        let r = std::fs::File::open(&path_cleaned).unwrap();
+        let mut reader = osmpbfreader::OsmPbfReader::new(r);
         println!("Reading time {}", now.elapsed().as_secs_f32());
+        for obj in reader.iter().map(Result::unwrap) {
+            match obj {
+                OsmObj::Node(e) => {
+                    nodes.insert(
+                        e.id.0,
+                        Node {
+                            id: e.id.0,
+                            lat: (e.lat() * f64::powi(10.0, 7)) as i64, //remember to backconvert when pulling val
+                            lon: (e.lon() * f64::powi(10.0, 7)) as i64, //remember to backconvert when pulling val
+                        },
+                    );
+                },
+                OsmObj::Way(e) => {
+                    let tags = e.tags.clone().into_inner();
+                    let road_type = tags.iter().find(|(k, _)| k.eq(&"highway"));
+                    let road_type = match road_type {
+                        Some((_k, v)) => v.to_string(),
+                        None => String::from(""),
+                    };
+                    ways.push(Way {
+                        id: e.id.0,
+                        road_type,
+                        refs: e.nodes.into_iter().map(|x| x.0).collect(),
+                    });
+                },
+                _ => {}
+            }
+        }
         Some((nodes, ways))
     }
 }
