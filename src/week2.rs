@@ -8,7 +8,7 @@ use std::u16::MAX;
 /*  Add a method reduceToLargestConnectedComponent to your RoadNetwork class that reduces
         the graph (already read from an OSM file) to its largest connected component.
     Run Dijkstra’s algorithm for 100 random queries for both of our OSM graphs
-         Use the version of the graph reduced to its largest connected component
+        Use the version of the graph reduced to its largest connected component
     Report the average running time and the average shortest path length per query
 */
 pub struct Dijkstra {
@@ -36,15 +36,14 @@ impl Dijkstra {
         Self {graph, visited_nodes}
     }
     //return node id of neighbors
-    pub fn get_neighbors (& mut self, current: Node) ->  Vec<(Node, u16)> {
+    pub fn get_neighbors (& mut self, current: Node) ->  Vec<(u16, Node)> {
         let mut paths = Vec::new();
         let mut next_node_edges = HashMap::new();
         if let Some(connections) =self.graph.edges.get(&current.id) {
             next_node_edges = connections.clone();
         }
         for path in next_node_edges {
-            paths.push((*self.graph.nodes.get(&path.0).unwrap(), path.1));
-        
+            paths.push((path.1, *self.graph.nodes.get(&path.0).unwrap()));
         }
         paths
     }
@@ -63,7 +62,6 @@ impl Dijkstra {
     }
 
     pub fn dijkstra(& mut self, source: Node, target: Node) -> Option<(Vec<Node>, u16)> {  //set target (-1) for all-node-settle rather than just target settle or smth
-        
         self.visited_nodes.push(0);
         //cost to reach nth node
         let mut stored_distance_per_node = HashMap::new();
@@ -73,35 +71,38 @@ impl Dijkstra {
         let mut priority_queue: BinaryHeap<Reverse<(u16, Node)>> = BinaryHeap::new();
         priority_queue.push(Reverse((0, source)));
         
-        
-        let _ = self.graph.nodes.iter().map(|node|{
+        //let _ = self.graph.nodes.iter().map(|node|{
+        let graph_clone = self.graph.nodes.clone();
+        for node in graph_clone {
             if !node.1.eq(&source) {
                 self.visited_nodes.push(0);
-                stored_distance_per_node.insert(*node.0, MAX);
-                priority_queue.push(Reverse((MAX, *node.1))); 
+                stored_distance_per_node.insert(node.0, MAX);
+                priority_queue.push(Reverse((MAX, node.1))); 
             }
-        });
+        }
+        //});
 
         let mut pathed_current_node: PathedNode = PathedNode { node_self: (source), parent_node: (None) };
 
         while !priority_queue.is_empty() {
             let current_node = priority_queue.pop().unwrap().0;  //.0 "unwraps" from Reverse()
             
-            if current_node.1.eq(&target) {
-                
+            if pathed_current_node.node_self.eq(&target) {
                 return Some(Self::get_path(pathed_current_node, stored_distance_per_node));
             }
-           
             let neighbors_of_current = Self::get_neighbors(self, current_node.1);
             for neighbor_node in neighbors_of_current {
-                let temp_distance = *stored_distance_per_node.get(&current_node.1.id).unwrap(); //+ edge distance
-                if temp_distance < *stored_distance_per_node.get(&neighbor_node.0.id).unwrap() {
-                    if let Some(x) = stored_distance_per_node.get_mut(&neighbor_node.0.id) {
-                        *x = temp_distance;
+                let temp_distance = *stored_distance_per_node.get(&current_node.1.id).unwrap() + neighbor_node.0;
+                if let Some(next_distance) = stored_distance_per_node.get(&neighbor_node.1.id) {
+                    if temp_distance < *next_distance {
+                        if let Some(x) = stored_distance_per_node.get_mut(&neighbor_node.1.id) {
+                            *x = temp_distance;
+                        }
+                        let prev_node: Rc<PathedNode> = Rc::new(pathed_current_node);
+                        pathed_current_node = PathedNode {node_self: neighbor_node.1, parent_node: Some(Rc::clone(&prev_node))};
+                        println!("fjdkfjdkfj");
+                        drop(prev_node);
                     }
-                    let prev_node: Rc<PathedNode> = Rc::new(pathed_current_node);
-                    pathed_current_node = PathedNode {node_self: neighbor_node.0, parent_node: Some(Rc::clone(&prev_node))};
-                    drop(prev_node);
                 }
 
             }
@@ -117,19 +118,25 @@ fn main() {}
 
 #[cfg(test)]
 mod tests {
-    use crate::RoadNetwork;
+    use crate::{Dijkstra, Node, RoadNetwork};
     
     #[test]
-    fn saarland_roadnet() {
+    fn saarland_dijkstra() {
         let data = RoadNetwork::read_from_osm_file("saarland_01.pbf").unwrap();
         let roads = RoadNetwork::new(data.0, data.1);
         println!("Nodes: {}, Edges: {}", roads.nodes.len(), roads.edges.len());
+        let mut shortest_path_graph = Dijkstra::new(roads);
+        let source= Node {id: 314060626, lat: 491468544, lon: 71136987};
+        let target = Node {id: 314060628, lat: 491467252, lon: 71141107};
+        println!("dijiktra path and cost {:?}", shortest_path_graph.dijkstra(source, target));
     }
+
     /*
     #[test]
-    fn bw_roadnet() {
+    fn bw_dijkstra() {
         let data = RoadNetwork::read_from_osm_file("baden-wuerttemberg_01.pbf").unwrap();
         let roads = RoadNetwork::new(data.0, data.1);
         println!("Nodes: {}, Edges: {}", roads.nodes.len(), roads.edges.len());
-    }*/
+    }
+    */
 }

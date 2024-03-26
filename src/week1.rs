@@ -150,7 +150,8 @@ mod tests {
         let data = RoadNetwork::read_from_osm_file("baden-wuerttemberg_01.pbf").unwrap();
         let roads = RoadNetwork::new(data.0, data.1);
         println!("Nodes: {}, Edges: {}", roads.nodes.len(), roads.edges.len());
-    }*/
+    }
+    */
 }
 
 fn main() {}
