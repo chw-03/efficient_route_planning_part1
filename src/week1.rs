@@ -66,11 +66,10 @@ impl RoadNetwork {
                 let head_id = way.refs[i + 1];
                 let head = nodes.get(&head_id);
                 if let (Some(tail), Some(head)) = (tail, head) {
-                    let cost = ((i64::pow((head.lat - tail.lat) * 111229, 2) as f64
-                        / f64::powi(10.0, 14))
-                        + (i64::pow((head.lon - tail.lon) * 71695, 2) as f64 / f64::powi(10.0, 14))
-                            .sqrt()
-                            / (1000.0 * (way.speed as f64))) as u16; // km / kmph == h (hours)
+                    let a = i128::pow(((head.lat - tail.lat) * 111229).into(), 2) as f64 / f64::powi(10.0, 14);
+                    let b = i128::pow(((head.lon - tail.lon) * 71695).into(), 2) as f64 / f64::powi(10.0, 14);
+                    let c = (a+b).sqrt();
+                    let cost = (c / ((way.speed as f64) * 5.0 / 18.0)) as u16; //meters per second
                     edges
                         .entry(tail_id)
                         .and_modify(|inner| {
@@ -138,9 +137,11 @@ impl RoadNetwork {
     pub fn reduce_to_largest_connected_component() {}
 }
 
+fn main() {}
+
 #[cfg(test)]
 mod tests {
-    
+    //use crate::RoadNetwork;
     /*
     #[test]
     fn saarland_roadnet() {
@@ -148,7 +149,8 @@ mod tests {
         let roads = RoadNetwork::new(data.0, data.1);
         println!("Nodes: {}, Edges: {}", roads.nodes.len(), roads.edges.len());
     }
-
+    */
+    /*
     #[test]
     fn bw_roadnet() {
         let data = RoadNetwork::read_from_osm_file("baden-wuerttemberg_01.pbf").unwrap();
@@ -157,5 +159,3 @@ mod tests {
     }
     */
 }
-
-fn main() {}
