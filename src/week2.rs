@@ -32,7 +32,7 @@ impl PathedNode {
 //implementation of dijkstra's shortest path algorithm
 impl Dijkstra {
     pub fn new(graph: RoadNetwork) -> Self {
-        let mut visited_nodes = Vec::new();
+        let visited_nodes = Vec::new();
         Self {
             graph,
             visited_nodes,
