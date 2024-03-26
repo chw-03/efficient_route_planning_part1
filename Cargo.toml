@@ -11,3 +11,7 @@ osmpbfreader = "0.16.1"
 [[bin]]
 name = "week1"
 path = "src/week1.rs"
+
+[[bin]]
+name = "week2"
+path = "src/week2.rs"
