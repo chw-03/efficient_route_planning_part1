@@ -66,9 +66,11 @@ impl RoadNetwork {
                 let head_id = way.refs[i + 1];
                 let head = nodes.get(&head_id);
                 if let (Some(tail), Some(head)) = (tail, head) {
-                    let a = i128::pow(((head.lat - tail.lat) * 111229).into(), 2) as f64 / f64::powi(10.0, 14);
-                    let b = i128::pow(((head.lon - tail.lon) * 71695).into(), 2) as f64 / f64::powi(10.0, 14);
-                    let c = (a+b).sqrt();
+                    let a = i128::pow(((head.lat - tail.lat) * 111229).into(), 2) as f64
+                        / f64::powi(10.0, 14);
+                    let b = i128::pow(((head.lon - tail.lon) * 71695).into(), 2) as f64
+                        / f64::powi(10.0, 14);
+                    let c = (a + b).sqrt();
                     let cost = (c / ((way.speed as f64) * 5.0 / 18.0)) as u16; //meters per second
                     edges
                         .entry(tail_id)

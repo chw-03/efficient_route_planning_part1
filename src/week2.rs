@@ -1,6 +1,6 @@
 mod week1;
 use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::{BinaryHeap, HashMap, VecDeque};
 use std::rc::Rc;
 use std::u16::MAX;
 use week1::*;
@@ -14,11 +14,13 @@ use week1::*;
 pub struct Dijkstra {
     graph: RoadNetwork,
     visited_nodes: Vec<u8>,
+    stored_distance_per_node: Vec<(i64, u16)>,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct PathedNode {
     node_self: Node,
+    //distance_from_start: u16
     parent_node: Option<Rc<PathedNode>>,
 }
 
@@ -34,9 +36,11 @@ impl PathedNode {
 impl Dijkstra {
     pub fn new(graph: RoadNetwork) -> Self {
         let visited_nodes = Vec::new();
+        let stored_distance_per_node = Vec::new();
         Self {
             graph,
             visited_nodes,
+            stored_distance_per_node,
         }
     }
     //return node id of neighbors
@@ -52,14 +56,25 @@ impl Dijkstra {
         paths
     }
 
+    pub fn find_stored_distance_for_node(&mut self, current: Node) -> u16 {
+        let distance: Vec<&(i64, u16)> = self.stored_distance_per_node.iter().filter(|x| x.0 == current.id).collect();
+        distance.get(0).unwrap().1
+    }
+
+    pub fn mut_stored_distance_for_node(&mut self, current: Node) -> u16 {
+        let distance: Vec<&(i64, u16)> = self.stored_distance_per_node.iter().filter(|x| x.0 == current.id)
+    }
+
     //Uses reference to find the source node with parent_node == None
-    pub fn get_path(target: PathedNode, stored_distances: HashMap<i64, u16>) -> (Vec<Node>, u16) {
+    pub fn get_path(&mut self, target: PathedNode, stored_distances: Vec<(i64, u16)>) -> (Vec<Node>, u16) {
         let mut shortest_path: Vec<Node> = Vec::new();
         let mut total_distance: u16 = 0;
         let mut current = target;
         while let Some(previous_node) = current.parent_node {
             shortest_path.push(current.node_self);
-            total_distance = total_distance + stored_distances.get(&current.node_self.id).unwrap();
+            //let prev_distance: Vec<&(i64, u16)> = stored_distances.iter().filter(|x| x.0 == current.node_self.id).collect();
+            total_distance = total_distance + Self::find_stored_distance_for_node(self, current.node_self);
+            //total_distance = total_distance + stored_distances.get(&current.node_self.id).unwrap();
             current = PathedNode::extract_parent(previous_node);
         }
         shortest_path.push(current.node_self);
@@ -70,8 +85,10 @@ impl Dijkstra {
         //set target (-1) for all-node-settle rather than just target settle or smth
         self.visited_nodes.push(0);
         //cost to reach nth node
-        let mut stored_distance_per_node = HashMap::new();
-        stored_distance_per_node.insert(source.id, 0);
+        
+        self.stored_distance_per_node.push((source.id, 0));
+        //let mut stored_distance_per_node = HashMap::new();
+        //stored_distance_per_node.insert(source.id, 0);
 
         //Heap(distance, node), Reverse turns binaryheap into minheap (default is maxheap)
         let mut priority_queue: BinaryHeap<Reverse<(u16, Node)>> = BinaryHeap::new();
@@ -82,7 +99,7 @@ impl Dijkstra {
         for node in graph_clone {
             if !node.0.eq(&source.id) {
                 self.visited_nodes.push(0);
-                stored_distance_per_node.insert(node.0, MAX);
+                self.stored_distance_per_node.push((node.0, MAX));
                 priority_queue.push(Reverse((MAX, node.1)));
             }
         }
@@ -93,43 +110,40 @@ impl Dijkstra {
             parent_node: (None),
         };
         let mut counter = 0;
-        while !priority_queue.is_empty() {
-            
+        while !priority_queue.is_empty() {    
             let current_node = priority_queue.pop().unwrap().0; //.0 "unwraps" from Reverse()
 
-
             if pathed_current_node.node_self.id.eq(&target.id) {
-                return Some(Self::get_path(
+                return Some(Self::get_path( self,
                     pathed_current_node,
-                    stored_distance_per_node,
+                    self.stored_distance_per_node,
                 ));
             }
             let neighbors_of_current = Self::get_neighbors(self, current_node.1);
             
-            if counter == 2 {
-                //println!("current {:?} and target {:?}", pathed_current_node.node_self, target);
-            }
+            //if counter < 3 {
+                //println!("currently at {:?} and target {:?}", pathed_current_node.node_self, target);
+            //}
 
             for neighbor_node in neighbors_of_current {
                 let temp_distance =
-                    *stored_distance_per_node.get(&current_node.1.id).unwrap() + neighbor_node.0;
-
-                if let Some(next_distance) = stored_distance_per_node.get(&neighbor_node.1.id) {
-                    if temp_distance < *next_distance {
-                        if let Some(x) = stored_distance_per_node.get_mut(&neighbor_node.1.id) {
+                    //*self.stored_distance_per_node.get(&current_node.1.id).unwrap() + neighbor_node.0;
+                    Self::find_stored_distance_for_node(self, current_node.1);
+                //if let Some(next_distance) = self.stored_distance_per_node.get(&neighbor_node.1.id) {
+                let next_distance = Self::find_stored_distance_for_node(self, neighbor_node.1);
+                    if temp_distance < next_distance {
+                        if let Some(x) = self.stored_distance_per_node.get_mut(&neighbor_node.1.id) {
                             *x = temp_distance;
                             let prev_node: Rc<PathedNode> = Rc::new(pathed_current_node);
                             pathed_current_node = PathedNode {
                                 node_self: neighbor_node.1,
                                 parent_node: Some(Rc::clone(&prev_node)),
                             };
-                            drop(prev_node);
+                            //drop(prev_node);
                         }
-                        
                     }
-                }
-                if counter == 0 {
-                    //println!("current node {:?}, to distance {:?}", pathed_current_node.node_self, stored_distance_per_node.get(&neighbor_node.1.id));
+                if counter < 3 {
+                    println!("moved to node {:?}, with distance {:?}", pathed_current_node.node_self, self.stored_distance_per_node.get(&neighbor_node.1.id));
                 }
             }
             counter = counter + 1;
@@ -145,7 +159,7 @@ fn main() {}
 mod tests {
     //use std::collections::HashMap;
     use crate::{Dijkstra, Node, RoadNetwork};
-
+    
     #[test]
     fn uci_dijkstra() {
         let data = RoadNetwork::read_from_osm_file("uci.osm.pbf").unwrap();
@@ -161,7 +175,7 @@ mod tests {
             lat: 336428062,
             lon: -1178390482,
         };
-        //println!("edges with source {:?}", roads.edges.get(&source.id).clone());
+        println!("edges with source {:?}", roads.edges.get(&source.id).clone());
         let mut shortest_path_graph = Dijkstra::new(roads);
         println!("dijiktra path and cost {:?}", shortest_path_graph.dijkstra(source, target));
     }
@@ -205,7 +219,7 @@ mod tests {
         );
     } */
 
-    /*
+    
     #[test]
     fn saarland_dijkstra() {
         let data = RoadNetwork::read_from_osm_file("saarland_01.pbf").unwrap();
@@ -213,21 +227,21 @@ mod tests {
         println!("Nodes: {}, Edges: {}", roads.nodes.len(), roads.edges.len());
         let mut shortest_path_graph = Dijkstra::new(roads);
         let source = Node {
-            id: 314060626,
-            lat: 491468544,
-            lon: 71136987,
+            id: 1020974368,
+            lat: 492246894,
+            lon: 70455740,
         };
         let target = Node {
-            id: 314060628,
-            lat: 491467252,
-            lon: 71141107,
+            id: 1020974185,
+            lat: 492251388,
+            lon: 70456316,
         };
-        println!(
-            "dijiktra path and cost {:?}",
-            shortest_path_graph.dijkstra(source, target)
-        );
+       // println!(
+       //     "dijiktra path and cost {:?}",
+        //    shortest_path_graph.dijkstra(source, target)
+       // );
     }
-    */
+    
     /*
     #[test]
     fn bw_dijkstra() {
