@@ -13,17 +13,17 @@ pub struct Node {
 pub struct Way {
     //ways from OSM, each with unique ID, speed from highway type, and referenced nodes that it connects
     pub id: i64,
-    pub speed: u16,
+    pub speed: u64,
     pub refs: Vec<i64>,
 }
 
 #[derive(Debug, PartialEq)]
 pub struct RoadNetwork {
     pub nodes: HashMap<i64, Node>,              // HASH < node.id, node >
-    pub edges: HashMap<i64, HashMap<i64, u16>>, // HASH < tail.id, HASH < head.id, cost >
+    pub edges: HashMap<i64, HashMap<i64, u64>>, // HASH < tail.id, HASH < head.id, cost >
 }
 
-fn speed_calc(highway: &str) -> Option<u16> {
+fn speed_calc(highway: &str) -> Option<u64> {
     //calculates speed of highway based on given values
     match highway {
         "motorway" => Some(110),
@@ -48,7 +48,7 @@ fn speed_calc(highway: &str) -> Option<u16> {
 impl RoadNetwork {
     pub fn new(nodes: HashMap<i64, Node>, ways: Vec<Way>) -> Self {
         //init new RoadNetwork based on results from reading .pbf file
-        let mut edges: HashMap<i64, HashMap<i64, u16>> = HashMap::new();
+        let mut edges: HashMap<i64, HashMap<i64, u64>> = HashMap::new();
         //println!("# of ways {}", ways.len());
         for way in ways {
             let mut previous_head_node_now_tail: Option<&Node> = None;
@@ -71,7 +71,7 @@ impl RoadNetwork {
                     let b = i128::pow(((head.lon - tail.lon) * 71695).into(), 2) as f64
                         / f64::powi(10.0, 14);
                     let c = (a + b).sqrt();
-                    let cost = (c / ((way.speed as f64) * 5.0 / 18.0)) as u16; //meters per second
+                    let cost = (c / ((way.speed as f64) * 5.0 / 18.0)) as u64; //meters per second
                     edges
                         .entry(tail_id)
                         .and_modify(|inner| {
