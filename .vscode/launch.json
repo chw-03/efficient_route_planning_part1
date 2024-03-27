@@ -8,8 +8,8 @@
       "args": [],
       "stopAtEntry": false,
       "externalConsole": true,
-      "cwd": "c:/Users/bookw/Downloads/MMS/BartMMS/UCI/IEEE-MicroMouse/mms/mms-cpp-master",
-      "program": "c:/Users/bookw/Downloads/MMS/BartMMS/UCI/IEEE-MicroMouse/mms/mms-cpp-master/build/Debug/outDebug",
+      "cwd": "c:/Users/bookw/Code/catenary/bast-homework",
+      "program": "c:/Users/bookw/Code/catenary/bast-homework/build/Debug/outDebug",
       "MIMode": "gdb",
       "miDebuggerPath": "gdb",
       "setupCommands": [
