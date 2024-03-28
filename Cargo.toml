@@ -7,11 +7,8 @@ edition = "2021"
 
 [dependencies]
 osmpbfreader = "0.16.1"
+rand = "0.8.5"
 
 [[bin]]
-name = "week1"
-path = "src/week1.rs"
-
-[[bin]]
-name = "week2"
-path = "src/week2.rs"
+name = "basic-algos"
+path = "src/basic-algos.rs"
