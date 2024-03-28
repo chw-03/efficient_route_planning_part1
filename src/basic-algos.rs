@@ -141,6 +141,7 @@ mod routing {
             let mut node_id = full_node_list.get(random).unwrap();
 
             while self.visited_nodes.contains(node_id) {
+                print!("b");
                 random = rng.gen_range(0..=full_node_list.len());
                 node_id = full_node_list.get(random).unwrap();
             }
@@ -361,44 +362,48 @@ fn main() {}
 mod tests {
     use crate::graph_construction::*;
     use crate::routing::*;
-
-    #[test]
-    fn uci_dijkstra() {
-        let data = RoadNetwork::read_from_osm_file("uci.osm.pbf").unwrap();
-        let mut roads = RoadNetwork::new(data.0, data.1);
-        println!(
-            "Nodes: {}, Edges: {}",
-            roads.nodes.len(),
-            roads
-                .edges
-                .iter()
-                .map(|(_, edges)| edges.len())
-                .sum::<usize>()
-        );
-        let source = 8925472275;
-        let target = 122610516;
-        let mut shortest_path_graph = Dijkstra::new(&roads);
-        println!(
-            "dijiktra path and cost {:?}\n",
-            shortest_path_graph.dijkstra(source, target)
-        );
-        roads = roads.reduce_to_largest_connected_component();
-        println!(
-            "reduced map nodes {}, and edges {}",
-            roads.nodes.len(),
-            roads
-                .edges
-                .iter()
-                .map(|(_, edges)| edges.len())
-                .sum::<usize>()
-        );
-        println!(
-            "dijiktra path and cost {:?}\n",
-            shortest_path_graph.dijkstra(source, target)
-        );
-    }
-
     /*
+        #[test]
+        fn uci_dijkstra() {
+            let data = RoadNetwork::read_from_osm_file("uci.osm.pbf").unwrap();
+            let mut roads = RoadNetwork::new(data.0, data.1);
+            println!(
+                "Nodes: {}, Edges: {}",
+                roads.nodes.len(),
+                roads
+                    .edges
+                    .iter()
+                    .map(|(_, edges)| edges.len())
+                    .sum::<usize>()
+            );
+            let source = 8925472275;
+            let target = 122610516;
+            let mut shortest_path_graph = Dijkstra::new(&roads);
+            println!(
+                "dijiktra path and cost {:?}\n",
+                shortest_path_graph.dijkstra(source, target)
+            );
+            println!("\n{}\n", shortest_path_graph.visited_nodes.len());
+            roads = roads.reduce_to_largest_connected_component();
+            shortest_path_graph = Dijkstra::new(&roads);
+            println!(
+                "reduced map nodes {}, and edges {}",
+                roads.nodes.len(),
+                roads
+                    .edges
+                    .iter()
+                    .map(|(_, edges)| edges.len())
+                    .sum::<usize>()
+            );
+            println!("\n{}\n", shortest_path_graph.visited_nodes.len());
+            println!(
+                "dijiktra path and cost {:?}\n",
+                shortest_path_graph.dijkstra(source, target)
+            );
+            println!("\n{}\n", shortest_path_graph.visited_nodes.len());
+        }
+    */
+
     #[test]
     fn saarland_dijkstra() {
         let data = RoadNetwork::read_from_osm_file("saarland_01.pbf").unwrap();
@@ -409,14 +414,14 @@ mod tests {
             roads.edges.len()
         );
         let mut shortest_path_graph = Dijkstra::new(&roads);
-        let source = 1020974368; //1329323405
+        let source = 1329323405; //1020974368
         let target = 1020974185;
         println!(
-            "dijiktra path and cost {:?} and visited {:?}\n",
+            "dijiktra path and cost {:?}\n",
             shortest_path_graph.dijkstra(source, target),
-            shortest_path_graph.visited_nodes.len()
         );
         roads = roads.reduce_to_largest_connected_component();
+        let mut shortest_path_graph = Dijkstra::new(&roads);
         println!(
             "reduced map nodes {}, and edges {}\n",
             roads.nodes.len(),
@@ -426,7 +431,7 @@ mod tests {
             "dijiktra path and cost {:?}\n",
             shortest_path_graph.dijkstra(source, target)
         );
-    }*/
+    }
 
     /*
     #[test]
