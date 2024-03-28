@@ -1,6 +1,4 @@
-/*  Add a method reduceToLargestConnectedComponent to your RoadNetwork class that reduces
-        the graph (already read from an OSM file) to its largest connected component.
-    Run Dijkstra’s algorithm for 100 random queries for both of our OSM graphs
+/*  Run Dijkstra’s algorithm for 100 random queries for both of our OSM graphs
         Use the version of the graph reduced to its largest connected component
     Report the average running time and the average shortest path length per query
 */
@@ -29,9 +27,7 @@ mod routing {
         pub fn extract_parent<PathedNode: std::clone::Clone>(
             last_elem: Rc<PathedNode>,
         ) -> PathedNode {
-            let inner: PathedNode =
-                //Rc::try_unwrap(last_elem).unwrap_or_else(|_| panic!("parent shared, unwrap failed"));
-                Rc::unwrap_or_clone(last_elem);
+            let inner: PathedNode = Rc::unwrap_or_clone(last_elem);
             inner
         }
     }
@@ -56,7 +52,6 @@ mod routing {
             }
             let current: Rc<PathedNode> = Rc::new(current.clone());
             for path in next_node_edges {
-                //paths.push((path.1, *self.graph.nodes.get(&path.0).unwrap()));
                 let node_self: Node = *self.graph.nodes.get(&path.0).unwrap();
                 paths.push((
                     PathedNode {
@@ -76,11 +71,8 @@ mod routing {
             let mut total_distance: u64 = 0;
             let mut current = target;
             while let Some(previous_node) = current.parent_node {
-                //println!("currently at {:?} and trying to unwrap {:?}", current.node_self, current.parent_node);
                 shortest_path.push(current.node_self);
-                //let prev_distance: Vec<&(i64, u64)> = stored_distances.iter().filter(|x| x.0 == current.node_self.id).collect();
                 total_distance = total_distance + current.distance_from_start;
-                //total_distance = total_distance + stored_distances.get(&current.node_self.id).unwrap();
                 current = PathedNode::extract_parent(previous_node);
             }
             shortest_path.push(current.node_self);
@@ -107,7 +99,6 @@ mod routing {
             let mut counter = 1;
             while !priority_queue.is_empty() {
                 let pathed_current_node = priority_queue.pop().unwrap().0 .1; //.0 "unwraps" from Reverse()
-                                                                              //self.settled_nodes.insert(pathed_current_node.node_self.id, pathed_current_node.distance_from_start);
                 if !(self.visited_nodes.insert(pathed_current_node.node_self.id)) {
                     continue;
                 }
@@ -119,26 +110,19 @@ mod routing {
                 for neighbor_node in self.get_neighbors(&pathed_current_node) {
                     // something to check if node was already done stuff to and skip this whole thing if yes
                     let temp_distance = pathed_current_node.distance_from_start + neighbor_node.1;
-                    //println!("temp {}, edge {}", temp_distance, neighbor_node.1);
-                    //*self.stored_distance_per_node.get(&current_node.1.id).unwrap() + neighbor_node.0;
-                    //if let Some(next_distance) = self.stored_distance_per_node.get(&neighbor_node.1.id) {
                     let next_distance = neighbor_node.0.distance_from_start;
                     if temp_distance < next_distance {
-                        //println!("change");
                         let prev_node: Rc<PathedNode> = Rc::new(pathed_current_node.clone());
                         let tentative_new_node = PathedNode {
                             node_self: neighbor_node.0.node_self,
                             distance_from_start: temp_distance,
                             parent_node: Some(prev_node),
                         };
-                        //if let Some(_) = self.visited_nodes.insert(neighbor_node.0.node_self.id, (tentative_new_node.clone(), counter)){
                         priority_queue.push(Reverse((temp_distance, tentative_new_node)));
-                        //}
                     }
                 }
                 counter = counter + 1;
             }
-            //println!("visted nodes along query{}", self.visited_nodes.len());
             None
         }
 
@@ -269,19 +253,14 @@ mod graph_construction {
                     }
                 }
             }
-
-            //println!("nodes raw len {}", nodes.len());
             let node_to_remove = nodes
                 .iter()
                 .filter(|(node, _)| !edges.contains_key(node))
                 .map(|(x, _)| x.clone())
                 .collect::<Vec<i64>>();
             for node in &node_to_remove {
-                //not working need to fix
                 nodes.remove(node);
             }
-
-            //println!("nodes dropped len {}", nodes.len());
 
             Self {
                 nodes,
@@ -335,7 +314,6 @@ mod graph_construction {
             let mut max_connections = 0;
 
             while let Some(source_id) = shortest_path_graph.get_random_unvisted_node_id() {
-                //println!("aaaaa {}, and {}", number_times_node_visted.len(), lone_node.len());
                 if number_times_node_visted.len() == self.nodes.len() {
                     break;
                 }
@@ -345,18 +323,22 @@ mod graph_construction {
                 shortest_path_graph.dijkstra(source_id, -1);
                 for node in &shortest_path_graph.visited_nodes {
                     number_times_node_visted.insert(*node, counter);
-                }   
+                }
             }
-            
+
             let mut new_node_list = Vec::new();
-            new_node_list = number_times_node_visted.iter().map(|(node, counter)| (node, counter)).collect();
+            new_node_list = number_times_node_visted
+                .iter()
+                .map(|(node, counter)| (node, counter))
+                .collect();
             new_node_list.sort_by(|(node1, counter1), (node2, counter2)| counter1.cmp(counter2));
 
-            let connected_components = &mut new_node_list.chunk_by(|(node1, counter1), (node2, counter2)| counter1 == counter2);
+            let connected_components = &mut new_node_list
+                .chunk_by(|(node1, counter1), (node2, counter2)| counter1 == counter2);
 
             let mut largest_node_set = Vec::new();
             let mut prev_set_size = 0;
-            
+
             while let Some(node_set) = connected_components.next() {
                 if node_set.len() > prev_set_size {
                     largest_node_set = node_set.to_vec();
@@ -364,9 +346,10 @@ mod graph_construction {
                 }
             }
 
-            let lcc_nodes = largest_node_set.iter()
-            .map(|(id, _)| (**id, *self.nodes.get(id).unwrap()))
-            .collect::<HashMap<i64, Node>>();
+            let lcc_nodes = largest_node_set
+                .iter()
+                .map(|(id, _)| (**id, *self.nodes.get(id).unwrap()))
+                .collect::<HashMap<i64, Node>>();
 
             RoadNetwork::new(lcc_nodes, self.raw_ways)
         }
@@ -383,21 +366,31 @@ mod tests {
     fn uci_dijkstra() {
         let data = RoadNetwork::read_from_osm_file("uci.osm.pbf").unwrap();
         let mut roads = RoadNetwork::new(data.0, data.1);
-        println!("Nodes: {}, Edges: {}", roads.nodes.len(), roads.edges.iter().map(|(_, edges)| edges.len()).sum::<usize>());
-        let source =8925472275;
-        let target = -1;
-        //let target = 122610516;
+        println!(
+            "Nodes: {}, Edges: {}",
+            roads.nodes.len(),
+            roads
+                .edges
+                .iter()
+                .map(|(_, edges)| edges.len())
+                .sum::<usize>()
+        );
+        let source = 8925472275;
+        let target = 122610516;
         let mut shortest_path_graph = Dijkstra::new(&roads);
         println!(
-            "dijiktra path and cost {:?}",
+            "dijiktra path and cost {:?}\n",
             shortest_path_graph.dijkstra(source, target)
         );
-        //println!("visted  {:?}", shortest_path_graph.visited_nodes.len());
         roads = roads.reduce_to_largest_connected_component();
         println!(
-            "reduced map nodes {}, and edges {}\n",
+            "reduced map nodes {}, and edges {}",
             roads.nodes.len(),
-            roads.edges.len()
+            roads
+                .edges
+                .iter()
+                .map(|(_, edges)| edges.len())
+                .sum::<usize>()
         );
         println!(
             "dijiktra path and cost {:?}\n",
