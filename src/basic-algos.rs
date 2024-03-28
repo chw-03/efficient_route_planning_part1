@@ -170,7 +170,7 @@ mod routing {
 mod graph_construction {
     use crate::routing::*;
     use osmpbfreader::objects::OsmObj;
-    use std::collections::HashMap;
+    use std::{collections::HashMap, ops::Index};
 
     #[derive(Debug, PartialEq, Hash, Eq, Clone, Copy, PartialOrd, Ord)]
     pub struct Node {
@@ -345,18 +345,30 @@ mod graph_construction {
                 shortest_path_graph.dijkstra(source_id, -1);
                 for node in &shortest_path_graph.visited_nodes {
                     number_times_node_visted.insert(*node, counter);
-                }
-                
+                }   
             }
+            
             let mut new_node_list = Vec::new();
-
             new_node_list = number_times_node_visted.iter().map(|(node, counter)| (node, counter)).collect();
-
             new_node_list.sort_by(|(node1, counter1), (node2, counter2)| counter1.cmp(counter2));
 
-            println!("sorted list {:?}", new_node_list);
+            let connected_components = &mut new_node_list.chunk_by(|(node1, counter1), (node2, counter2)| counter1 == counter2);
 
-            RoadNetwork::new(HashMap::new(), self.raw_ways)
+            let mut largest_node_set = Vec::new();
+            let mut prev_set_size = 0;
+            
+            while let Some(node_set) = connected_components.next() {
+                if node_set.len() > prev_set_size {
+                    largest_node_set = node_set.to_vec();
+                    prev_set_size = node_set.len();
+                }
+            }
+
+            let lcc_nodes = largest_node_set.iter()
+            .map(|(id, _)| (**id, *self.nodes.get(id).unwrap()))
+            .collect::<HashMap<i64, Node>>();
+
+            RoadNetwork::new(lcc_nodes, self.raw_ways)
         }
     }
 }
@@ -367,7 +379,6 @@ mod tests {
     use crate::graph_construction::*;
     use crate::routing::*;
 
-    
     #[test]
     fn uci_dijkstra() {
         let data = RoadNetwork::read_from_osm_file("uci.osm.pbf").unwrap();
