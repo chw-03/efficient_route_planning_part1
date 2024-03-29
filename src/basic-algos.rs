@@ -126,27 +126,39 @@ mod routing {
             None
         }
 
-        pub fn get_random_unvisted_node_id(&mut self) -> Option<i64> {
-            if self.visited_nodes.len() == self.graph.nodes.len() {
-                println!("all nodes visted");
-                return None;
-            }
-            let mut full_node_list = Vec::new();
+        pub fn get_random_node_id(&mut self) -> Option<i64> {
             let mut rng = rand::thread_rng();
+            let mut full_node_list = Vec::new();
             for node in &self.graph.nodes {
                 full_node_list.push(node.0);
             }
-
             let mut random: usize = rng.gen_range(0..full_node_list.len());
             let mut node_id = full_node_list.get(random).unwrap();
 
-            while self.visited_nodes.contains(node_id) {
-                print!("b");
-                random = rng.gen_range(0..=full_node_list.len());
-                node_id = full_node_list.get(random).unwrap();
-            }
-
             Some(**node_id)
+        }
+
+        pub fn get_unvisted_node_id(
+            &mut self,
+            other_located_nodes: &HashMap<i64, i32>,
+        ) -> Option<i64> {
+            if other_located_nodes.len() == self.graph.nodes.len() {
+                println!("all nodes visted");
+                return None;
+            }
+            let other_located_nodes = other_located_nodes
+                .iter()
+                .filter(|(id, count)| **count > 0)
+                .map(|(id, _)| id)
+                .collect::<Vec<&i64>>();
+
+            //problem section
+            for node in &self.graph.nodes {
+                if !other_located_nodes.contains(&node.0) {
+                    return Some(*node.0);
+                }
+            }
+            None
         }
     }
 }
@@ -154,6 +166,7 @@ mod routing {
 #[allow(unused)]
 mod graph_construction {
     use crate::routing::*;
+    use core::num;
     use osmpbfreader::objects::OsmObj;
     use std::{collections::HashMap, ops::Index};
 
@@ -314,19 +327,19 @@ mod graph_construction {
             let mut shortest_path_graph = Dijkstra::new(&self);
             let mut max_connections = 0;
 
-            while let Some(source_id) = shortest_path_graph.get_random_unvisted_node_id() {
-                if number_times_node_visted.len() == self.nodes.len() {
-                    break;
-                }
-
+            while let Some(source_id) =
+                shortest_path_graph.get_unvisted_node_id(&number_times_node_visted)
+            {
                 counter = counter + 1;
                 let mut shortest_path_graph = Dijkstra::new(&self);
                 shortest_path_graph.dijkstra(source_id, -1);
                 for node in &shortest_path_graph.visited_nodes {
                     number_times_node_visted.insert(*node, counter);
                 }
+                if number_times_node_visted.len() > (self.nodes.len() / 2) {
+                    break;
+                }
             }
-
             let mut new_node_list = Vec::new();
             new_node_list = number_times_node_visted
                 .iter()
@@ -362,64 +375,68 @@ fn main() {}
 mod tests {
     use crate::graph_construction::*;
     use crate::routing::*;
-    /*
-        #[test]
-        fn uci_dijkstra() {
-            let data = RoadNetwork::read_from_osm_file("uci.osm.pbf").unwrap();
-            let mut roads = RoadNetwork::new(data.0, data.1);
-            println!(
-                "Nodes: {}, Edges: {}",
-                roads.nodes.len(),
-                roads
-                    .edges
-                    .iter()
-                    .map(|(_, edges)| edges.len())
-                    .sum::<usize>()
+    use std::time::Instant;
+    ///*    
+    #[test]
+    fn dijkstra() {
+        let data = RoadNetwork::read_from_osm_file("saarland.pbf").unwrap();
+        let mut roads = RoadNetwork::new(data.0, data.1);
+        roads = roads.reduce_to_largest_connected_component();
+        println!(
+            "reduced map nodes {}, and edges {}",
+            roads.nodes.len(),
+            roads
+                .edges
+                .iter()
+                .map(|(_, edges)| edges.len())
+                .sum::<usize>()
+                / 2
+        );
+        let mut routing_graph = Dijkstra::new(&roads);
+        /*let source: i64 = 8925472275; //8299570283;
+        let target: i64 = 122610516; //3688516475;
+        println!(
+            "dijiktra {:?}\n",
+            shortest_path_graph.dijkstra(source, target)
+        );*/
+        let mut shortest_path_costs = Vec::new();
+        let mut query_time = Vec::new();
+        let mut settled_nodes = Vec::new();
+        for _ in 0..100 {
+            let source = routing_graph.get_random_node_id().unwrap();
+            let target = routing_graph.get_random_node_id().unwrap();
+            let now = Instant::now();
+            routing_graph = Dijkstra::new(&roads);
+            shortest_path_costs.push(
+                routing_graph
+                    .dijkstra(source, target)
+                    .unwrap_or((vec![], 0))
+                    .1,
             );
-            let source = 8925472275;
-            let target = 122610516;
-            let mut shortest_path_graph = Dijkstra::new(&roads);
-            println!(
-                "dijiktra path and cost {:?}\n",
-                shortest_path_graph.dijkstra(source, target)
-            );
-            println!("\n{}\n", shortest_path_graph.visited_nodes.len());
-            roads = roads.reduce_to_largest_connected_component();
-            shortest_path_graph = Dijkstra::new(&roads);
-            println!(
-                "reduced map nodes {}, and edges {}",
-                roads.nodes.len(),
-                roads
-                    .edges
-                    .iter()
-                    .map(|(_, edges)| edges.len())
-                    .sum::<usize>()
-            );
-            println!("\n{}\n", shortest_path_graph.visited_nodes.len());
-            println!(
-                "dijiktra path and cost {:?}\n",
-                shortest_path_graph.dijkstra(source, target)
-            );
-            println!("\n{}\n", shortest_path_graph.visited_nodes.len());
+            query_time.push(now.elapsed().as_millis() as f32 * 0.001);
+            settled_nodes.push(routing_graph.visited_nodes.len() as u64);
         }
-    */
-
+        println!(
+            "average cost in minutes {}",
+            shortest_path_costs.iter().sum::<u64>() / shortest_path_costs.len() as u64 / 60
+        );
+        println!(
+            "average query time in seconds {}",
+            query_time.iter().sum::<f32>() / query_time.len() as f32
+        );
+        println!(
+            "average settle node number {}",
+            settled_nodes.iter().sum::<u64>() / settled_nodes.len() as u64
+        );
+    }
+    //*/
+    /*
     #[test]
     fn saarland_dijkstra() {
         let data = RoadNetwork::read_from_osm_file("saarland_01.pbf").unwrap();
         let mut roads = RoadNetwork::new(data.0, data.1);
-        println!(
-            "Nodes: {}, Edges: {} \n",
-            roads.nodes.len(),
-            roads.edges.len()
-        );
-        let mut shortest_path_graph = Dijkstra::new(&roads);
-        let source = 1329323405; //1020974368
+        let source = 1020974368;
         let target = 1020974185;
-        println!(
-            "dijiktra path and cost {:?}\n",
-            shortest_path_graph.dijkstra(source, target),
-        );
         roads = roads.reduce_to_largest_connected_component();
         let mut shortest_path_graph = Dijkstra::new(&roads);
         println!(
@@ -427,11 +444,14 @@ mod tests {
             roads.nodes.len(),
             roads.edges.len()
         );
+        let source: i64 = 8925472275; //8299570283;
+        let target: i64 = 122610516; //3688516475;
         println!(
             "dijiktra path and cost {:?}\n",
             shortest_path_graph.dijkstra(source, target)
         );
     }
+    */
 
     /*
     #[test]
