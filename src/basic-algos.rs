@@ -68,11 +68,10 @@ mod routing {
         //Uses reference to find the source node with parent_node == None
         pub fn get_path(&mut self, target: PathedNode) -> (Vec<Node>, u64) {
             let mut shortest_path: Vec<Node> = Vec::new();
-            let mut total_distance: u64 = 0;
+            let mut total_distance: u64 = target.distance_from_start;
             let mut current = target;
             while let Some(previous_node) = current.parent_node {
                 shortest_path.push(current.node_self);
-                total_distance = total_distance + current.distance_from_start;
                 current = PathedNode::extract_parent(previous_node);
             }
             shortest_path.push(current.node_self);
@@ -141,7 +140,7 @@ mod routing {
         pub fn get_unvisted_node_id(
             &mut self,
             other_located_nodes: &HashMap<i64, i32>,
-        ) -> Option<i64> {
+            ) -> Option<i64> {
             if other_located_nodes.len() == self.graph.nodes.len() {
                 println!("all nodes visted");
                 return None;
@@ -241,7 +240,8 @@ mod graph_construction {
                         let b = i128::pow(((head.lon - tail.lon) * 71695).into(), 2) as f64
                             / f64::powi(10.0, 14);
                         let c = (a + b).sqrt();
-                        let cost = (c / ((way.speed as f64) * 5.0 / 18.0)) as u64; //meters per second
+                        let cost = (c as u64) / ((way.speed as f64) * 5.0 / 18.0) as u64; //meters per second
+                        //println!("segment length {} and time {}", c, cost);
                         edges
                             .entry(tail_id)
                             .and_modify(|inner| {
@@ -375,11 +375,27 @@ fn main() {}
 mod tests {
     use crate::graph_construction::*;
     use crate::routing::*;
-    use std::time::Instant;
-    ///*    
+    
+    /*
+    #[test]
+    fn saarland_dijkstra() {
+        let data = RoadNetwork::read_from_osm_file("saarland.pbf").unwrap();
+        let mut roads = RoadNetwork::new(data.0, data.1);
+        roads = roads.reduce_to_largest_connected_component();
+
+        //let mut shortest_path_graph = Dijkstra::new(&roads);
+        //println!("dijiktra {:?}\n\n",shortest_path_graph.dijkstra(1020974368, 1020974185));
+
+        let mut shortest_path_graph = Dijkstra::new(&roads);
+        println!("dijiktra {:?}\n\n",shortest_path_graph.dijkstra(265651781, 497391820).unwrap());
+    }
+    */
+
+    ///*  
+    use std::time::Instant;  
     #[test]
     fn dijkstra() {
-        let data = RoadNetwork::read_from_osm_file("saarland.pbf").unwrap();
+        let data = RoadNetwork::read_from_osm_file("bw.pbf").unwrap();
         let mut roads = RoadNetwork::new(data.0, data.1);
         roads = roads.reduce_to_largest_connected_component();
         println!(
@@ -393,12 +409,6 @@ mod tests {
                 / 2
         );
         let mut routing_graph = Dijkstra::new(&roads);
-        /*let source: i64 = 8925472275; //8299570283;
-        let target: i64 = 122610516; //3688516475;
-        println!(
-            "dijiktra {:?}\n",
-            shortest_path_graph.dijkstra(source, target)
-        );*/
         let mut shortest_path_costs = Vec::new();
         let mut query_time = Vec::new();
         let mut settled_nodes = Vec::new();
@@ -407,13 +417,9 @@ mod tests {
             let target = routing_graph.get_random_node_id().unwrap();
             let now = Instant::now();
             routing_graph = Dijkstra::new(&roads);
-            shortest_path_costs.push(
-                routing_graph
-                    .dijkstra(source, target)
-                    .unwrap_or((vec![], 0))
-                    .1,
-            );
+            let result = routing_graph.dijkstra(source, target);
             query_time.push(now.elapsed().as_millis() as f32 * 0.001);
+            shortest_path_costs.push(result.unwrap_or((vec![], 0)).1);
             settled_nodes.push(routing_graph.visited_nodes.len() as u64);
         }
         println!(
@@ -430,28 +436,6 @@ mod tests {
         );
     }
     //*/
-    /*
-    #[test]
-    fn saarland_dijkstra() {
-        let data = RoadNetwork::read_from_osm_file("saarland_01.pbf").unwrap();
-        let mut roads = RoadNetwork::new(data.0, data.1);
-        let source = 1020974368;
-        let target = 1020974185;
-        roads = roads.reduce_to_largest_connected_component();
-        let mut shortest_path_graph = Dijkstra::new(&roads);
-        println!(
-            "reduced map nodes {}, and edges {}\n",
-            roads.nodes.len(),
-            roads.edges.len()
-        );
-        let source: i64 = 8925472275; //8299570283;
-        let target: i64 = 122610516; //3688516475;
-        println!(
-            "dijiktra path and cost {:?}\n",
-            shortest_path_graph.dijkstra(source, target)
-        );
-    }
-    */
 
     /*
     #[test]
