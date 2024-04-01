@@ -1,30 +1,229 @@
-/*  Run Dijkstra’s algorithm for 100 random queries for both of our OSM graphs
-        Use the version of the graph reduced to its largest connected component
-    Report the average running time and the average shortest path length per query
-*/
 #[allow(unused)]
-mod routing {
+mod graph_construction {        //constructs and preprocesses the graph struct from OSM data
+    use crate::routing::*;
+    use core::num;
+    use osmpbfreader::objects::OsmObj;
+    use std::{collections::HashMap, ops::Index};
+
+    #[derive(Debug, PartialEq, Hash, Eq, Clone, Copy, PartialOrd, Ord)]
+    pub struct Node {       //nodes from OSM, each with unique ID and coordinate position
+        pub id: i64,
+        pub lat: i64,
+        pub lon: i64,
+    }
+
+    #[derive(Debug, PartialEq, Hash, Eq, Clone)]
+    pub struct Way {        //ways from OSM, each with unique ID, speed from highway type, and referenced nodes that it connects
+        pub id: i64,
+        pub speed: u64,
+        pub refs: Vec<i64>,
+    }
+
+    #[derive(Debug, PartialEq, Clone)]
+    pub struct RoadNetwork {        //graph struct that will be used to route
+        pub nodes: HashMap<i64, Node>,              // <node.id, node>
+        pub edges: HashMap<i64, HashMap<i64, u64>>, // tail.id, <head.id, cost>
+        pub raw_ways: Vec<Way>,
+    }
+
+    fn speed_calc(highway: &str) -> Option<u64> {       //calculates speed of highway based on given values
+        match highway {
+            "motorway" => Some(110),
+            "trunk" => Some(110),
+            "primary" => Some(70),
+            "secondary" => Some(60),
+            "tertiary" => Some(50),
+            "motorway_link" => Some(50),
+            "trunk_link" => Some(50),
+            "primary_link" => Some(50),
+            "secondary_link" => Some(50),
+            "road" => Some(40),
+            "unclassified" => Some(40),
+            "residential" => Some(30),
+            "unsurfaced" => Some(30),
+            "living_street" => Some(10),
+            "service" => Some(5),
+            _ => None,
+        }
+    }
+
+    impl RoadNetwork {
+        pub fn new(mut nodes: HashMap<i64, Node>, ways: Vec<Way>) -> Self {         //init new RoadNetwork based on results from reading .pbf file
+            let mut edges: HashMap<i64, HashMap<i64, u64>> = HashMap::new();
+            //println!("# of ways {}", ways.len());
+            for way in ways.clone() {
+                let mut previous_head_node_now_tail: Option<&Node> = None;
+                let mut previous_head_node_index: usize = 0;
+                for i in 0..way.refs.len() - 1 {
+                    let tail_id = way.refs[i];
+                    let tail: Option<&Node> = match previous_head_node_now_tail {
+                        Some(previous_head_node_now_tail) => match previous_head_node_index == i {
+                            true => Some(previous_head_node_now_tail),
+                            false => nodes.get(&tail_id),
+                        },
+                        None => nodes.get(&tail_id),
+                    };
+
+                    let head_id = way.refs[i + 1];
+                    let head = nodes.get(&head_id);
+                    if let (Some(tail), Some(head)) = (tail, head) {        //following math converts lon/lat into distance of segment
+                        let a = i128::pow(((head.lat - tail.lat) * 111229).into(), 2) as f64
+                            / f64::powi(10.0, 14);
+                        let b = i128::pow(((head.lon - tail.lon) * 71695).into(), 2) as f64
+                            / f64::powi(10.0, 14);
+                        let c = (a + b).sqrt();
+                        let cost = (c as u64) / ((way.speed as f64) * 5.0 / 18.0) as u64; //seconds needed to traverse segment based on road type
+                        //println!("segment length {} and time {}", c, cost);
+                        edges
+                            .entry(tail_id)
+                            .and_modify(|inner| {
+                                inner.insert(head_id, cost);
+                            })
+                            .or_insert({
+                                let mut a = HashMap::new();
+                                a.insert(head_id, cost);
+                                a
+                            });
+                        edges
+                            .entry(head.id)
+                            .and_modify(|inner| {
+                                inner.insert(tail_id, cost);
+                            })
+                            .or_insert({
+                                let mut a = HashMap::new();
+                                a.insert(tail_id, cost);
+                                a
+                            });
+                        previous_head_node_now_tail = Some(&head);
+                        previous_head_node_index = i + 1;
+                    }
+                }
+            }
+            let node_to_remove = nodes
+                .iter()
+                .filter(|(node, _)| !edges.contains_key(node))
+                .map(|(x, _)| x.clone())
+                .collect::<Vec<i64>>();
+            for node in &node_to_remove {
+                nodes.remove(node);
+            }
+
+            Self {
+                nodes,
+                raw_ways: ways,
+                edges,
+            }
+        }
+
+        pub fn read_from_osm_file(path: &str) -> Option<(HashMap<i64, Node>, Vec<Way>)> {       //reads osm.pbf file, values are used to make RoadNetwork
+            let mut nodes = HashMap::new();
+            let mut ways = Vec::new();
+            let path_cleaned = std::path::Path::new(&path);
+            let r = std::fs::File::open(&path_cleaned).unwrap();
+            let mut reader = osmpbfreader::OsmPbfReader::new(r);
+            for obj in reader.iter().map(Result::unwrap) {
+                match obj {
+                    OsmObj::Node(e) => {
+                        nodes.insert(
+                            e.id.0,
+                            Node {
+                                id: e.id.0,
+                                lat: (e.lat() * f64::powi(10.0, 7)) as i64,
+                                lon: (e.lon() * f64::powi(10.0, 7)) as i64,
+                            },
+                        );
+                    }
+                    OsmObj::Way(e) => {
+                        if let Some(road_type) =
+                            e.tags.clone().iter().find(|(k, _)| k.eq(&"highway"))
+                        {
+                            if let Some(speed) = speed_calc(road_type.1.as_str()) {
+                                ways.push(Way {
+                                    id: e.id.0,
+                                    speed,
+                                    refs: e.nodes.into_iter().map(|x| x.0).collect(),
+                                });
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Some((nodes, ways))
+        }
+
+        pub fn reduce_to_largest_connected_component(self) -> Self {        //reduces graph to largest connected component through nodes visited with dijkstra
+            let mut counter = 0;
+            let mut number_times_node_visted: HashMap<i64, i32> = HashMap::new();
+            let mut shortest_path_graph = Dijkstra::new(&self);
+            let mut max_connections = 0;
+
+            while let Some(source_id) =
+                shortest_path_graph.get_unvisted_node_id(&number_times_node_visted)
+            {
+                counter = counter + 1;
+                let mut shortest_path_graph = Dijkstra::new(&self);
+                shortest_path_graph.dijkstra(source_id, -1);
+                for node in &shortest_path_graph.visited_nodes {
+                    number_times_node_visted.insert(*node, counter);
+                }
+                if number_times_node_visted.len() > (self.nodes.len() / 2) {
+                    break;
+                }
+            }
+            let mut new_node_list = Vec::new();
+            new_node_list = number_times_node_visted
+                .iter()
+                .map(|(node, counter)| (node, counter))
+                .collect();
+            new_node_list.sort_by(|(node1, counter1), (node2, counter2)| counter1.cmp(counter2));
+
+            let connected_components = &mut new_node_list
+                .chunk_by(|(node1, counter1), (node2, counter2)| counter1 == counter2);
+
+            let mut largest_node_set = Vec::new();
+            let mut prev_set_size = 0;
+
+            while let Some(node_set) = connected_components.next() {
+                if node_set.len() > prev_set_size {
+                    largest_node_set = node_set.to_vec();
+                    prev_set_size = node_set.len();
+                }
+            }
+
+            let lcc_nodes = largest_node_set
+                .iter()
+                .map(|(id, _)| (**id, *self.nodes.get(id).unwrap()))
+                .collect::<HashMap<i64, Node>>();
+
+            RoadNetwork::new(lcc_nodes, self.raw_ways)
+        }
+    }
+}
+
+#[allow(unused)]
+mod routing {       //routing algorithms and helper functiions
     use crate::graph_construction::*;
     use rand::Rng;
     use std::cmp::Reverse;
     use std::collections::{BinaryHeap, HashMap, HashSet};
     use std::rc::Rc;
     use std::u64::MAX;
-    pub struct Dijkstra {
+    pub struct Dijkstra {       //handle dijkstra calculations
         pub graph: RoadNetwork,
         pub visited_nodes: HashSet<i64>,
         //settled_nodes: HashMap<i64, u64>,
     }
 
     #[derive(Debug, PartialEq, Clone, Eq, PartialOrd, Ord)]
-    pub struct PathedNode {
+    pub struct PathedNode {         //node that references parent nodes, used to create path from goal node to start node
         node_self: Node,
         distance_from_start: u64,
         parent_node: Option<Rc<PathedNode>>,
     }
 
     impl PathedNode {
-        pub fn extract_parent<PathedNode: std::clone::Clone>(
+        pub fn extract_parent<PathedNode: std::clone::Clone>(       //returns parent of a pathed node
             last_elem: Rc<PathedNode>,
         ) -> PathedNode {
             let inner: PathedNode = Rc::unwrap_or_clone(last_elem);
@@ -32,8 +231,7 @@ mod routing {
         }
     }
 
-    //implementation of dijkstra's shortest path algorithm
-    impl Dijkstra {
+    impl Dijkstra {          //implementation of dijkstra's shortest path algorithm
         pub fn new(graph: &RoadNetwork) -> Self {
             let visited_nodes = HashSet::new();
             //let settled_nodes = HashMap::new();
@@ -43,8 +241,8 @@ mod routing {
                 //settled_nodes,
             }
         }
-        //return node id of neighbors
-        pub fn get_neighbors(&mut self, current: &PathedNode) -> Vec<(PathedNode, u64)> {
+        
+        pub fn get_neighbors(&mut self, current: &PathedNode) -> Vec<(PathedNode, u64)> {       //return node id of neighbors
             let mut paths = Vec::new();
             let mut next_node_edges = HashMap::new();
             if let Some(connections) = self.graph.edges.get(&current.node_self.id) {
@@ -65,8 +263,8 @@ mod routing {
             paths
         }
 
-        //Uses reference to find the source node with parent_node == None
-        pub fn get_path(&mut self, target: PathedNode) -> (Vec<Node>, u64) {
+        
+        pub fn get_path(&mut self, target: PathedNode) -> (Vec<Node>, u64) {        //uses reference to find the source node with parent_node == None
             let mut shortest_path: Vec<Node> = Vec::new();
             let mut total_distance: u64 = target.distance_from_start;
             let mut current = target;
@@ -125,7 +323,7 @@ mod routing {
             None
         }
 
-        pub fn get_random_node_id(&mut self) -> Option<i64> {
+        pub fn get_random_node_id(&mut self) -> Option<i64> {       //returns ID of a random valid node from a graph
             let mut rng = rand::thread_rng();
             let mut full_node_list = Vec::new();
             for node in &self.graph.nodes {
@@ -137,7 +335,7 @@ mod routing {
             Some(**node_id)
         }
 
-        pub fn get_unvisted_node_id(
+        pub fn get_unvisted_node_id(        //returns the first unvisted node that function parses upon (used to find largest connected component)
             &mut self,
             other_located_nodes: &HashMap<i64, i32>,
             ) -> Option<i64> {
@@ -162,241 +360,22 @@ mod routing {
     }
 }
 
-#[allow(unused)]
-mod graph_construction {
-    use crate::routing::*;
-    use core::num;
-    use osmpbfreader::objects::OsmObj;
-    use std::{collections::HashMap, ops::Index};
-
-    #[derive(Debug, PartialEq, Hash, Eq, Clone, Copy, PartialOrd, Ord)]
-    pub struct Node {
-        //nodes from OSM, each with unique ID and coordinate position
-        pub id: i64,
-        pub lat: i64,
-        pub lon: i64,
-    }
-
-    #[derive(Debug, PartialEq, Hash, Eq, Clone)]
-    pub struct Way {
-        //ways from OSM, each with unique ID, speed from highway type, and referenced nodes that it connects
-        pub id: i64,
-        pub speed: u64,
-        pub refs: Vec<i64>,
-    }
-
-    #[derive(Debug, PartialEq, Clone)]
-    pub struct RoadNetwork {
-        pub nodes: HashMap<i64, Node>,              // HASH < node.id, node >
-        pub edges: HashMap<i64, HashMap<i64, u64>>, // HASH < tail.id, HASH < head.id, cost >
-        pub raw_ways: Vec<Way>,
-    }
-
-    fn speed_calc(highway: &str) -> Option<u64> {
-        //calculates speed of highway based on given values
-        match highway {
-            "motorway" => Some(110),
-            "trunk" => Some(110),
-            "primary" => Some(70),
-            "secondary" => Some(60),
-            "tertiary" => Some(50),
-            "motorway_link" => Some(50),
-            "trunk_link" => Some(50),
-            "primary_link" => Some(50),
-            "secondary_link" => Some(50),
-            "road" => Some(40),
-            "unclassified" => Some(40),
-            "residential" => Some(30),
-            "unsurfaced" => Some(30),
-            "living_street" => Some(10),
-            "service" => Some(5),
-            _ => None,
-        }
-    }
-
-    impl RoadNetwork {
-        pub fn new(mut nodes: HashMap<i64, Node>, ways: Vec<Way>) -> Self {
-            //init new RoadNetwork based on results from reading .pbf file
-            let mut edges: HashMap<i64, HashMap<i64, u64>> = HashMap::new();
-            //println!("# of ways {}", ways.len());
-            for way in ways.clone() {
-                let mut previous_head_node_now_tail: Option<&Node> = None;
-                let mut previous_head_node_index: usize = 0;
-                for i in 0..way.refs.len() - 1 {
-                    let tail_id = way.refs[i];
-                    let tail: Option<&Node> = match previous_head_node_now_tail {
-                        Some(previous_head_node_now_tail) => match previous_head_node_index == i {
-                            true => Some(previous_head_node_now_tail),
-                            false => nodes.get(&tail_id),
-                        },
-                        None => nodes.get(&tail_id),
-                    };
-
-                    let head_id = way.refs[i + 1];
-                    let head = nodes.get(&head_id);
-                    if let (Some(tail), Some(head)) = (tail, head) {
-                        let a = i128::pow(((head.lat - tail.lat) * 111229).into(), 2) as f64
-                            / f64::powi(10.0, 14);
-                        let b = i128::pow(((head.lon - tail.lon) * 71695).into(), 2) as f64
-                            / f64::powi(10.0, 14);
-                        let c = (a + b).sqrt();
-                        let cost = (c as u64) / ((way.speed as f64) * 5.0 / 18.0) as u64; //meters per second
-                        //println!("segment length {} and time {}", c, cost);
-                        edges
-                            .entry(tail_id)
-                            .and_modify(|inner| {
-                                inner.insert(head_id, cost);
-                            })
-                            .or_insert({
-                                let mut a = HashMap::new();
-                                a.insert(head_id, cost);
-                                a
-                            });
-                        edges
-                            .entry(head.id)
-                            .and_modify(|inner| {
-                                inner.insert(tail_id, cost);
-                            })
-                            .or_insert({
-                                let mut a = HashMap::new();
-                                a.insert(tail_id, cost);
-                                a
-                            });
-                        previous_head_node_now_tail = Some(&head);
-                        previous_head_node_index = i + 1;
-                    }
-                }
-            }
-            let node_to_remove = nodes
-                .iter()
-                .filter(|(node, _)| !edges.contains_key(node))
-                .map(|(x, _)| x.clone())
-                .collect::<Vec<i64>>();
-            for node in &node_to_remove {
-                nodes.remove(node);
-            }
-
-            Self {
-                nodes,
-                raw_ways: ways,
-                edges,
-            }
-        }
-
-        pub fn read_from_osm_file(path: &str) -> Option<(HashMap<i64, Node>, Vec<Way>)> {
-            //reads osm.pbf file, values are used to make RoadNetwork
-            let mut nodes = HashMap::new();
-            let mut ways = Vec::new();
-            let path_cleaned = std::path::Path::new(&path);
-            let r = std::fs::File::open(&path_cleaned).unwrap();
-            let mut reader = osmpbfreader::OsmPbfReader::new(r);
-            for obj in reader.iter().map(Result::unwrap) {
-                match obj {
-                    OsmObj::Node(e) => {
-                        nodes.insert(
-                            e.id.0,
-                            Node {
-                                id: e.id.0,
-                                lat: (e.lat() * f64::powi(10.0, 7)) as i64,
-                                lon: (e.lon() * f64::powi(10.0, 7)) as i64,
-                            },
-                        );
-                    }
-                    OsmObj::Way(e) => {
-                        if let Some(road_type) =
-                            e.tags.clone().iter().find(|(k, _)| k.eq(&"highway"))
-                        {
-                            if let Some(speed) = speed_calc(road_type.1.as_str()) {
-                                ways.push(Way {
-                                    id: e.id.0,
-                                    speed,
-                                    refs: e.nodes.into_iter().map(|x| x.0).collect(),
-                                });
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            Some((nodes, ways))
-        }
-
-        pub fn reduce_to_largest_connected_component(self) -> Self {
-            let mut counter = 0;
-            let mut number_times_node_visted: HashMap<i64, i32> = HashMap::new();
-            let mut shortest_path_graph = Dijkstra::new(&self);
-            let mut max_connections = 0;
-
-            while let Some(source_id) =
-                shortest_path_graph.get_unvisted_node_id(&number_times_node_visted)
-            {
-                counter = counter + 1;
-                let mut shortest_path_graph = Dijkstra::new(&self);
-                shortest_path_graph.dijkstra(source_id, -1);
-                for node in &shortest_path_graph.visited_nodes {
-                    number_times_node_visted.insert(*node, counter);
-                }
-                if number_times_node_visted.len() > (self.nodes.len() / 2) {
-                    break;
-                }
-            }
-            let mut new_node_list = Vec::new();
-            new_node_list = number_times_node_visted
-                .iter()
-                .map(|(node, counter)| (node, counter))
-                .collect();
-            new_node_list.sort_by(|(node1, counter1), (node2, counter2)| counter1.cmp(counter2));
-
-            let connected_components = &mut new_node_list
-                .chunk_by(|(node1, counter1), (node2, counter2)| counter1 == counter2);
-
-            let mut largest_node_set = Vec::new();
-            let mut prev_set_size = 0;
-
-            while let Some(node_set) = connected_components.next() {
-                if node_set.len() > prev_set_size {
-                    largest_node_set = node_set.to_vec();
-                    prev_set_size = node_set.len();
-                }
-            }
-
-            let lcc_nodes = largest_node_set
-                .iter()
-                .map(|(id, _)| (**id, *self.nodes.get(id).unwrap()))
-                .collect::<HashMap<i64, Node>>();
-
-            RoadNetwork::new(lcc_nodes, self.raw_ways)
-        }
-    }
-}
 fn main() {}
 
 #[cfg(test)]
 mod tests {
     use crate::graph_construction::*;
     use crate::routing::*;
-    
-    /*
-    #[test]
-    fn saarland_dijkstra() {
-        let data = RoadNetwork::read_from_osm_file("saarland.pbf").unwrap();
-        let mut roads = RoadNetwork::new(data.0, data.1);
-        roads = roads.reduce_to_largest_connected_component();
-
-        //let mut shortest_path_graph = Dijkstra::new(&roads);
-        //println!("dijiktra {:?}\n\n",shortest_path_graph.dijkstra(1020974368, 1020974185));
-
-        let mut shortest_path_graph = Dijkstra::new(&roads);
-        println!("dijiktra {:?}\n\n",shortest_path_graph.dijkstra(265651781, 497391820).unwrap());
-    }
-    */
-
     ///*  
     use std::time::Instant;  
     #[test]
     fn dijkstra() {
-        let data = RoadNetwork::read_from_osm_file("bw.pbf").unwrap();
+        //let path = "bw.pbf";
+        //let path = "uci.pbf";
+        let path = "saarland.pbf";
+        let data = RoadNetwork::read_from_osm_file(path).unwrap();
         let mut roads = RoadNetwork::new(data.0, data.1);
+        println!("{} Base Graph Nodes: {}, Edges: {}", path, roads.nodes.len(), roads.edges.len());
         roads = roads.reduce_to_largest_connected_component();
         println!(
             "reduced map nodes {}, and edges {}",
@@ -436,15 +415,6 @@ mod tests {
         );
     }
     //*/
-
-    /*
-    #[test]
-    fn bw_roadnet() {
-        let data = RoadNetwork::read_from_osm_file("baden-wuerttemberg_01.pbf").unwrap();
-        let roads = RoadNetwork::new(data.0, data.1);
-        println!("Nodes: {}, Edges: {}", roads.nodes.len(), roads.edges.len());
-    }
-    */
 
     /*
         use std::collections::HashMap;
