@@ -163,7 +163,7 @@ mod graph_construction {        //constructs and preprocesses the graph struct f
             {
                 counter = counter + 1;
                 let mut shortest_path_graph = Dijkstra::new(&self);
-                shortest_path_graph.dijkstra(source_id, -1);
+                shortest_path_graph.dijkstra(source_id, -1, false);
                 for node in &shortest_path_graph.visited_nodes {
                     number_times_node_visted.insert(*node, counter);
                 }
@@ -276,7 +276,14 @@ mod routing {       //routing algorithms and helper functiions
             (shortest_path, total_distance)
         }
 
-        pub fn dijkstra(&mut self, source_id: i64, target_id: i64) -> Option<(Vec<Node>, u64)> {
+        pub fn heuristic(&mut self, current: Node, target: Node, is_used: bool) -> u64 {
+            match is_used {
+                true => return 1,  //h[u]
+                false => return 0,
+            }
+        }
+
+        pub fn dijkstra(&mut self, source_id: i64, target_id: i64, used_h: bool) -> Option<(Vec<Node>, u64)> {
             //Heap(distance, node), Reverse turns binaryheap into minheap (default is maxheap)
             let mut priority_queue: BinaryHeap<Reverse<(u64, PathedNode)>> = BinaryHeap::new();
             //set target (-1) for all-node-settle rather than just target settle or smth
@@ -285,12 +292,25 @@ mod routing {       //routing algorithms and helper functiions
                 .nodes
                 .get(&source_id)
                 .unwrap_or_else(|| panic!("source node not found"));
-
+            
             let source_node: PathedNode = PathedNode {
                 node_self: (source),
                 distance_from_start: 0,
                 parent_node: (None),
             };
+            let mut target: Node = Node {
+                id: 0,
+                lon: 0,
+                lat: 0,
+            };
+            if target_id > 0 {
+                target = *self
+                .graph
+                .nodes
+                .get(&target_id)
+                .unwrap_or_else(|| panic!("source node not found"));
+            }
+
             priority_queue.push(Reverse((0, source_node.clone())));
 
             let mut counter = 1;
@@ -315,7 +335,9 @@ mod routing {       //routing algorithms and helper functiions
                             distance_from_start: temp_distance,
                             parent_node: Some(prev_node),
                         };
-                        priority_queue.push(Reverse((temp_distance, tentative_new_node)));
+                        priority_queue.push(Reverse((temp_distance + 
+                            self.heuristic(neighbor_node.0.node_self, target, used_h), tentative_new_node)));
+                            //sort nodes in PQ by f score rather than g score, but still choses neighbor based on g score
                     }
                 }
                 counter = counter + 1;
@@ -396,7 +418,7 @@ mod tests {
             let target = routing_graph.get_random_node_id().unwrap();
             let now = Instant::now();
             routing_graph = Dijkstra::new(&roads);
-            let result = routing_graph.dijkstra(source, target);
+            let result = routing_graph.dijkstra(source, target, true);
             query_time.push(now.elapsed().as_millis() as f32 * 0.001);
             shortest_path_costs.push(result.unwrap_or((vec![], 0)).1);
             settled_nodes.push(routing_graph.visited_nodes.len() as u64);
