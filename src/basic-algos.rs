@@ -157,13 +157,14 @@ mod graph_construction {        //constructs and preprocesses the graph struct f
             let mut number_times_node_visted: HashMap<i64, i32> = HashMap::new();
             let mut shortest_path_graph = Dijkstra::new(&self);
             let mut max_connections = 0;
+            let heuristics = HashMap::new();
 
             while let Some(source_id) =
                 shortest_path_graph.get_unvisted_node_id(&number_times_node_visted)
             {
                 counter = counter + 1;
                 let mut shortest_path_graph = Dijkstra::new(&self);
-                shortest_path_graph.dijkstra(source_id, -1, false);
+                shortest_path_graph.dijkstra(source_id, -1, heuristics);
                 for node in &shortest_path_graph.visited_nodes {
                     number_times_node_visted.insert(*node, counter);
                 }
@@ -209,10 +210,10 @@ mod routing {       //routing algorithms and helper functiions
     use std::collections::{BinaryHeap, HashMap, HashSet};
     use std::rc::Rc;
     use std::u64::MAX;
+
     pub struct Dijkstra {       //handle dijkstra calculations
         pub graph: RoadNetwork,
         pub visited_nodes: HashSet<i64>,
-        //settled_nodes: HashMap<i64, u64>,
     }
 
     #[derive(Debug, PartialEq, Clone, Eq, PartialOrd, Ord)]
@@ -231,14 +232,19 @@ mod routing {       //routing algorithms and helper functiions
         }
     }
 
+    pub fn heuristic_costs(target: i64) -> HashMap<i64, u64>{
+        let heuristics = HashMap::new();
+        //for each current i64 id, enter euciladan distance from current to target, divided by max speed on that path
+
+        heuristics
+    }
+
     impl Dijkstra {          //implementation of dijkstra's shortest path algorithm
         pub fn new(graph: &RoadNetwork) -> Self {
             let visited_nodes = HashSet::new();
-            //let settled_nodes = HashMap::new();
             Self {
                 graph: graph.clone(),
                 visited_nodes,
-                //settled_nodes,
             }
         }
         
@@ -276,17 +282,11 @@ mod routing {       //routing algorithms and helper functiions
             (shortest_path, total_distance)
         }
 
-        pub fn heuristic(&mut self, current: Node, target: Node, is_used: bool) -> u64 {
-            match is_used {
-                true => return 1,  //h[u]
-                false => return 0,
-            }
-        }
-
-        pub fn dijkstra(&mut self, source_id: i64, target_id: i64, used_h: bool) -> Option<(Vec<Node>, u64)> {
+        pub fn dijkstra(&mut self, source_id: i64, target_id: i64, heuristics: HashMap<i64, u64>) -> Option<(Vec<Node>, u64)> {
             //Heap(distance, node), Reverse turns binaryheap into minheap (default is maxheap)
             let mut priority_queue: BinaryHeap<Reverse<(u64, PathedNode)>> = BinaryHeap::new();
             //set target (-1) for all-node-settle rather than just target settle or smth
+
             let source = *self
                 .graph
                 .nodes
@@ -336,7 +336,7 @@ mod routing {       //routing algorithms and helper functiions
                             parent_node: Some(prev_node),
                         };
                         priority_queue.push(Reverse((temp_distance + 
-                            self.heuristic(neighbor_node.0.node_self, target, used_h), tentative_new_node)));
+                            heuristics.get(&neighbor_node.0.node_self.id).unwrap_or_default(), tentative_new_node)));
                             //sort nodes in PQ by f score rather than g score, but still choses neighbor based on g score
                     }
                 }
@@ -388,10 +388,11 @@ fn main() {}
 mod tests {
     use crate::graph_construction::*;
     use crate::routing::*;
+    use std::collections::HashMap;
     ///*  
     use std::time::Instant;  
     #[test]
-    fn dijkstra() {
+    fn run_algo() {
         //let path = "bw.pbf";
         //let path = "uci.pbf";
         let path = "saarland.pbf";
@@ -413,6 +414,10 @@ mod tests {
         let mut shortest_path_costs = Vec::new();
         let mut query_time = Vec::new();
         let mut settled_nodes = Vec::new();
+        //to do a star, uncomment
+        let heuristics = HashMap::new();
+        heuristic_costs(target_id); //sets heurstic values to either 0 for dijkstra or h(u, t) for a*
+
         for _ in 0..100 {
             let source = routing_graph.get_random_node_id().unwrap();
             let target = routing_graph.get_random_node_id().unwrap();
