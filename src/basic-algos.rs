@@ -353,7 +353,7 @@ mod routing {
             let mut counter = 1;
             while !priority_queue.is_empty() {
                 let pathed_current_node = priority_queue.pop().unwrap().0 .1; //.0 "unwraps" from Reverse()
-                if let None = (self.visited_nodes.insert(pathed_current_node.node_self.id, pathed_current_node.distance_from_start)) {
+                if let Some(_) = (self.visited_nodes.insert(pathed_current_node.node_self.id, pathed_current_node.distance_from_start)) {
                     continue;
                 }
 
@@ -476,80 +476,7 @@ mod routing {
             counter = counter + 1;
         }
         None
-    }
-    
-    
-    pub fn landmark_a_star_routing(
-        &mut self,
-        source_id: i64,
-        target_id: i64,
-        landmark_precompute: &HashMap<i64, HashMap<i64, u64>>
-    ) -> Option<(Vec<Node>, u64)> {
-        //Heap(distance, node), Reverse turns binaryheap into minheap (default is maxheap)
-        let mut priority_queue: BinaryHeap<Reverse<(u64, PathedNode)>> = BinaryHeap::new();
-        //set target (-1) for all-node-settle rather than just target settle or smth
-
-        let source = *self
-            .graph
-            .nodes
-            .get(&source_id)
-            .unwrap_or_else(|| panic!("source node not found"));
-
-        let source_node: PathedNode = PathedNode {
-            node_self: (source),
-            distance_from_start: 0,
-            parent_node: (None),
-        };
-
-        priority_queue.push(Reverse((0, source_node.clone())));
-
-        let mut target: Node = Node {
-            id: 0,
-            lon: 0,
-            lat: 0,
-        };
-        if target_id > 0 {
-            target = *self
-                .graph
-                .nodes
-                .get(&target_id)
-                .unwrap_or_else(|| panic!("source node not found"));
-        }
-
-        let mut counter = 1;
-        while !priority_queue.is_empty() {
-            let pathed_current_node = priority_queue.pop().unwrap().0 .1; //.0 "unwraps" from Reverse()
-            if let Some(_) = (self.visited_nodes.insert(pathed_current_node.node_self.id, pathed_current_node.distance_from_start)) {
-                continue;
-            }
-
-            if pathed_current_node.node_self.id.eq(&target_id) {
-                return Some(self.get_path(pathed_current_node));
-            }
-
-            for neighbor_node in self.get_neighbors(&pathed_current_node) {
-                // something to check if node was already done stuff to and skip this whole thing if yes
-                let temp_distance = pathed_current_node.distance_from_start + neighbor_node.1;
-                let next_distance = neighbor_node.0.distance_from_start;
-                if temp_distance < next_distance {
-                    let prev_node: Rc<PathedNode> = Rc::new(pathed_current_node.clone());
-                    let tentative_new_node = PathedNode {
-                        node_self: neighbor_node.0.node_self,
-                        distance_from_start: temp_distance,
-                        parent_node: Some(prev_node),
-                    };
-                    priority_queue.push(Reverse((
-                        temp_distance
-                            + landmark_heuristic(&landmark_precompute, neighbor_node.0.node_self.id, target_id),
-                        tentative_new_node,
-                    )));
-                }
-            }
-            counter = counter + 1;
-        }
-        None
-    }
-    
+    } 
     }
 }
 
@@ -628,13 +555,14 @@ mod landmark_algo {
     })).collect::<HashMap<i64, HashMap<i64, u64>>>() //landmark_id, node_id, distance
     }
     
-    pub fn landmark_heuristic(landmark_precompute: &HashMap<i64, HashMap<i64, u64>>, source: i64, target: i64) -> u64 {
-        landmark_precompute.iter().map(|(_, &ref arr)| {
-            let dist_lu = *arr.get(&source).unwrap();
-            let dist_tu = *arr.get(&target).unwrap();
-            dist_lu.abs_diff(dist_tu)
-        }).max().unwrap();
-        0
+    pub fn landmark_heuristic(landmark_precompute: &HashMap<i64, HashMap<i64, u64>>, dijkstra_graph: &Dijkstra, target: i64) -> HashMap<i64, u64> {
+        dijkstra_graph.graph.nodes.iter().map(|(source, _)| (*source, {
+            landmark_precompute.iter().map(|(_, &ref arr)| {
+                let dist_lu = *arr.get(source).unwrap();
+                let dist_tu = *arr.get(&target).unwrap();
+                dist_lu.abs_diff(dist_tu)
+            }).max().unwrap()
+        })).collect()
     }
 
 }
@@ -677,7 +605,7 @@ mod tests {
         let mut shortest_path_costs = Vec::new();
         let mut query_time = Vec::new();
         let mut settled_nodes = Vec::new();
-        //let mut heuristics;
+        let mut heuristics;
         let now = Instant::now();
         let precompute = landmark_heuristic_precompute(&mut routing_graph, 42); //i think i did it the hard way with greedy the first time
         let mut time = now.elapsed().as_millis() as f32 * 0.001;
@@ -687,10 +615,10 @@ mod tests {
             let target = routing_graph.get_random_node_id().unwrap();
             //heuristics = a_star_heuristic(&roads, target); //sets heurstic values for a*, comment out for base Dijkstra
             //heuristics = landmark_heuristic(&roads, target, &landmark_list); //a* with landmarks on greedy pick
-            
+            heuristics = landmark_heuristic(&precompute, &routing_graph, target);
             routing_graph = Dijkstra::new(&roads);
             let now = Instant::now();
-            let result = routing_graph.landmark_a_star_routing(source, target, &precompute);
+            let result = routing_graph.dijkstra(source, target, &heuristics);
             time = now.elapsed().as_millis() as f32 * 0.001;
             query_time.push(time);
             shortest_path_costs.push(result.unwrap_or((vec![], 0)).1);
