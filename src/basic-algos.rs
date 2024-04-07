@@ -425,25 +425,19 @@ mod routing {
             }
             None
         }
-    }
-}
+        
+        pub fn set_dijkstra(
+            &mut self,
+            node_set: Vec<i64>,
+            target_id: i64
+        ) -> Option<u64> {
+            //Heap(distance, node), Reverse turns binaryheap into minheap (default is maxheap)
+            let mut priority_queue: BinaryHeap<Reverse<(u64, PathedNode)>> = BinaryHeap::new();
+            //set target (-1) for all-node-settle rather than just target settle or smth
 
-mod landmark_algo {
-    use crate::graph_construction::*;
-    use crate::routing::*;
-    use core::cmp::Reverse;
-    use std::collections::BinaryHeap;
-    use std::collections::HashMap;
-    use std::rc::Rc;
-
-    pub fn set_dijkstra(dijkstra_graph: &mut Dijkstra, node_set: &Vec<i64>, target_id: i64) -> u64 {
-        //Heap(distance, node), Reverse turns binaryheap into minheap (default is maxheap)
-        let mut priority_queue: BinaryHeap<Reverse<(u64, PathedNode)>> = BinaryHeap::new();
-        //set target (-1) for all-node-settle rather than just target settle or smth
-
-        for id in node_set {
+        for id in &node_set {
             //pushes all nodes in set into PQ with distance 0
-            let node_from_set = *dijkstra_graph
+            let node_from_set = *self
                 .graph
                 .nodes
                 .get(&id)
@@ -460,7 +454,7 @@ mod landmark_algo {
         let mut counter = 1;
         while !priority_queue.is_empty() {
             let pathed_current_node = priority_queue.pop().unwrap().0 .1; //.0 "unwraps" from Reverse()
-            if !(dijkstra_graph
+            if !(self
                 .visited_nodes
                 .insert(pathed_current_node.node_self.id))
             {
@@ -468,10 +462,10 @@ mod landmark_algo {
             }
 
             if pathed_current_node.node_self.id.eq(&target_id) {
-                return dijkstra_graph.get_path(pathed_current_node).1;
+                return Some(self.get_path(pathed_current_node).1);
             }
 
-            for neighbor_node in dijkstra_graph.get_neighbors(&pathed_current_node) {
+            for neighbor_node in self.get_neighbors(&pathed_current_node) {
                 // something to check if node was already done stuff to and skip this whole thing if yes
                 let temp_distance = pathed_current_node.distance_from_start + neighbor_node.1;
                 let next_distance = neighbor_node.0.distance_from_start;
@@ -487,9 +481,18 @@ mod landmark_algo {
             }
             counter = counter + 1;
         }
-        0
+        None
     }
 
+    
+    }
+}
+
+mod landmark_algo {
+    use crate::routing::*;
+    use std::collections::HashMap;
+    /* //failed greedy node that i didnt need to make anyway
+    
     pub fn select_landmarks(dijkstra_graph: &mut Dijkstra, num_landmarks: usize) -> Vec<i64> {
         let mut node_set: Vec<i64> = Vec::new();
         node_set.push(dijkstra_graph.get_random_node_id().unwrap()); //push random first node to start
@@ -499,7 +502,7 @@ mod landmark_algo {
             let target_set = dijkstra_graph.graph.nodes.clone();
             let target_ids = target_set.keys();
             for target_id in target_ids {
-                let temp = set_dijkstra(dijkstra_graph, &node_set, *target_id);
+                let temp = dijkstra_graph.set_dijkstra(&node_set, *target_id).unwrap();
                 if temp > distance {
                     distance = temp;
                     max_dist_node = *target_id
@@ -510,11 +513,7 @@ mod landmark_algo {
         node_set
     }
 
-    pub fn landmark_heuristic(
-        graph: &RoadNetwork,
-        target: i64,
-        landmarks: &Vec<i64>,
-    ) -> HashMap<i64, u64> {
+    pub fn landmark_heuristic(graph: &RoadNetwork, target: i64, landmarks: &Vec<i64>) -> HashMap<i64, u64> {
         let target = *graph.nodes.get(&target).unwrap();
         let landmark_nodes = landmarks
             .iter()
@@ -546,6 +545,22 @@ mod landmark_algo {
                 .collect::<HashMap<i64, u64>>();
         //println!("to {} is distance est {:?}", target, heuristics.clone().into_values());
         heuristics
+    }
+    */
+    
+    pub fn landmark_heuristic(mut dijkstra_graph: Dijkstra, num_landmarks: usize, target: i64) -> HashMap<i64, u64> {
+        let empty_hash = HashMap::new();
+        let node_list = dijkstra_graph.graph.nodes.clone();
+        let mut landmarks = Vec::new();
+        for i in 0..num_landmarks {
+            landmarks.push(dijkstra_graph.get_random_node_id().unwrap());
+        }
+        node_list.into_iter().map(|(current,_)| (current, 
+            landmarks.iter().map(|l| {
+                dijkstra_graph.dijkstra(*l, current, &empty_hash).unwrap().1
+                .abs_diff(dijkstra_graph.dijkstra(*l, target, &empty_hash).unwrap().1)
+            }).max().unwrap()
+        )).collect::<HashMap<i64, u64>>()
     }
 }
 fn main() {}
@@ -590,15 +605,16 @@ mod tests {
         //let mut heuristics = HashMap::new(); //empty hashmap for dijkstra
         let mut heuristics;
         let now = Instant::now();
-        let landmark_list = select_landmarks(&mut routing_graph, 42);
-        println!("time to compute landmarks: {}", now.elapsed().as_millis() as f32 * 0.001);
+        //let landmark_list = select_landmarks(&mut routing_graph, 42);
+        //println!("time to compute landmarks: {}", now.elapsed().as_millis() as f32 * 0.001);
         let mut time;
 
         for _ in 0..100 { 
             let source = routing_graph.get_random_node_id().unwrap();
             let target = routing_graph.get_random_node_id().unwrap();
             //heuristics = a_star_heuristic(&roads, target); //sets heurstic values for a*, comment out for base Dijkstra
-            heuristics = landmark_heuristic(&roads, target, &landmark_list); //a* with landmarks
+            //heuristics = landmark_heuristic(&roads, target, &landmark_list); //a* with landmarks
+            heuristics = landmark_heuristic(routing_graph, 42, target); //i think i did it the hard way with greedy the first time
             routing_graph = Dijkstra::new(&roads);
             let now = Instant::now();
             let result = routing_graph.dijkstra(source, target, &heuristics);
