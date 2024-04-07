@@ -225,7 +225,7 @@ mod routing {
     pub struct Dijkstra {
         //handle dijkstra calculations
         pub graph: RoadNetwork,
-        pub visited_nodes: HashSet<(i64, u64)>,
+        pub visited_nodes: HashMap<i64, u64>,
     }
 
     #[derive(Debug, PartialEq, Clone, Eq, PartialOrd, Ord)]
@@ -271,7 +271,7 @@ mod routing {
     impl Dijkstra {
         //implementation of dijkstra's shortest path algorithm
         pub fn new(graph: &RoadNetwork) -> Self {
-            let visited_nodes = HashSet::new();
+            let visited_nodes = HashMap::new();
             Self {
                 graph: graph.clone(),
                 visited_nodes,
@@ -353,7 +353,7 @@ mod routing {
             let mut counter = 1;
             while !priority_queue.is_empty() {
                 let pathed_current_node = priority_queue.pop().unwrap().0 .1; //.0 "unwraps" from Reverse()
-                if !(self.visited_nodes.insert((pathed_current_node.node_self.id, pathed_current_node.distance_from_start))) {
+                if let None = (self.visited_nodes.insert(pathed_current_node.node_self.id, pathed_current_node.distance_from_start)) {
                     continue;
                 }
 
@@ -449,10 +449,9 @@ mod routing {
         let mut counter = 1;
         while !priority_queue.is_empty() {
             let pathed_current_node = priority_queue.pop().unwrap().0 .1; //.0 "unwraps" from Reverse()
-            if !(self
+            if let Some(_) = (self
                 .visited_nodes
-                .insert((pathed_current_node.node_self.id, pathed_current_node.distance_from_start)))
-            {
+                .insert(pathed_current_node.node_self.id, pathed_current_node.distance_from_start)) {
                 continue;
             }
 
@@ -520,7 +519,7 @@ mod routing {
         let mut counter = 1;
         while !priority_queue.is_empty() {
             let pathed_current_node = priority_queue.pop().unwrap().0 .1; //.0 "unwraps" from Reverse()
-            if !(self.visited_nodes.insert((pathed_current_node.node_self.id, pathed_current_node.distance_from_start))) {
+            if let Some(_) = (self.visited_nodes.insert(pathed_current_node.node_self.id, pathed_current_node.distance_from_start)) {
                 continue;
             }
 
@@ -625,7 +624,7 @@ mod landmark_algo {
         landmarks.iter().map(|&l| (l, {
             let mut graph = Dijkstra::new(&roads);
             graph.dijkstra(l, -1, &empty_hash);
-            graph.visited_nodes.iter().map(|&x| x).collect()
+            graph.visited_nodes.iter().map(|(id, dist)| (*id, *dist)).collect()
     })).collect::<HashMap<i64, HashMap<i64, u64>>>() //landmark_id, node_id, distance
     }
     
