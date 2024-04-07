@@ -1,32 +1,37 @@
 #[allow(unused)]
-mod graph_construction {        //constructs and preprocesses the graph struct from OSM data
+mod graph_construction {
+    //constructs and preprocesses the graph struct from OSM data
     use crate::routing::*;
     use core::num;
     use osmpbfreader::objects::OsmObj;
     use std::{collections::HashMap, ops::Index};
 
     #[derive(Debug, PartialEq, Hash, Eq, Clone, Copy, PartialOrd, Ord)]
-    pub struct Node {       //nodes from OSM, each with unique ID and coordinate position
+    pub struct Node {
+        //nodes from OSM, each with unique ID and coordinate position
         pub id: i64,
         pub lat: i64,
         pub lon: i64,
     }
 
     #[derive(Debug, PartialEq, Hash, Eq, Clone)]
-    pub struct Way {        //ways from OSM, each with unique ID, speed from highway type, and referenced nodes that it connects
+    pub struct Way {
+        //ways from OSM, each with unique ID, speed from highway type, and referenced nodes that it connects
         pub id: i64,
         pub speed: u64,
         pub refs: Vec<i64>,
     }
 
     #[derive(Debug, PartialEq, Clone)]
-    pub struct RoadNetwork {        //graph struct that will be used to route
+    pub struct RoadNetwork {
+        //graph struct that will be used to route
         pub nodes: HashMap<i64, Node>,              // <node.id, node>
         pub edges: HashMap<i64, HashMap<i64, u64>>, // tail.id, <head.id, cost>
         pub raw_ways: Vec<Way>,
     }
 
-    fn speed_calc(highway: &str) -> Option<u64> {       //calculates speed of highway based on given values
+    fn speed_calc(highway: &str) -> Option<u64> {
+        //calculates speed of highway based on given values
         match highway {
             "motorway" => Some(110),
             "trunk" => Some(110),
@@ -48,7 +53,8 @@ mod graph_construction {        //constructs and preprocesses the graph struct f
     }
 
     impl RoadNetwork {
-        pub fn new(mut nodes: HashMap<i64, Node>, ways: Vec<Way>) -> Self {         //init new RoadNetwork based on results from reading .pbf file
+        pub fn new(mut nodes: HashMap<i64, Node>, ways: Vec<Way>) -> Self {
+            //init new RoadNetwork based on results from reading .pbf file
             let mut edges: HashMap<i64, HashMap<i64, u64>> = HashMap::new();
             //println!("# of ways {}", ways.len());
             for way in ways.clone() {
@@ -66,14 +72,15 @@ mod graph_construction {        //constructs and preprocesses the graph struct f
 
                     let head_id = way.refs[i + 1];
                     let head = nodes.get(&head_id);
-                    if let (Some(tail), Some(head)) = (tail, head) {        //following math converts lon/lat into distance of segment
+                    if let (Some(tail), Some(head)) = (tail, head) {
+                        //following math converts lon/lat into distance of segment
                         let a = i128::pow(((head.lat - tail.lat) * 111229).into(), 2) as f64
                             / f64::powi(10.0, 14);
                         let b = i128::pow(((head.lon - tail.lon) * 71695).into(), 2) as f64
                             / f64::powi(10.0, 14);
                         let c = (a + b).sqrt();
                         let cost = (c as u64) / ((way.speed as f64) * 5.0 / 18.0) as u64; //seconds needed to traverse segment based on road type
-                        //println!("segment length {} and time {}", c, cost);
+                                                                                          //println!("segment length {} and time {}", c, cost);
                         edges
                             .entry(tail_id)
                             .and_modify(|inner| {
@@ -115,7 +122,8 @@ mod graph_construction {        //constructs and preprocesses the graph struct f
             }
         }
 
-        pub fn read_from_osm_file(path: &str) -> Option<(HashMap<i64, Node>, Vec<Way>)> {       //reads osm.pbf file, values are used to make RoadNetwork
+        pub fn read_from_osm_file(path: &str) -> Option<(HashMap<i64, Node>, Vec<Way>)> {
+            //reads osm.pbf file, values are used to make RoadNetwork
             let mut nodes = HashMap::new();
             let mut ways = Vec::new();
             let path_cleaned = std::path::Path::new(&path);
@@ -152,7 +160,8 @@ mod graph_construction {        //constructs and preprocesses the graph struct f
             Some((nodes, ways))
         }
 
-        pub fn reduce_to_largest_connected_component(self) -> Self {        //reduces graph to largest connected component through nodes visited with dijkstra
+        pub fn reduce_to_largest_connected_component(self) -> Self {
+            //reduces graph to largest connected component through nodes visited with dijkstra
             let mut counter = 0;
             let mut number_times_node_visted: HashMap<i64, i32> = HashMap::new();
             let mut shortest_path_graph = Dijkstra::new(&self);
@@ -164,7 +173,7 @@ mod graph_construction {        //constructs and preprocesses the graph struct f
             {
                 counter = counter + 1;
                 let mut shortest_path_graph = Dijkstra::new(&self);
-                shortest_path_graph.dijkstra(source_id, -1, heuristics);
+                shortest_path_graph.dijkstra(source_id, -1, &heuristics);
                 for node in &shortest_path_graph.visited_nodes {
                     number_times_node_visted.insert(*node, counter);
                 }
@@ -203,7 +212,8 @@ mod graph_construction {        //constructs and preprocesses the graph struct f
 }
 
 #[allow(unused)]
-mod routing {       //routing algorithms and helper functiions
+mod routing {
+    //routing algorithms and helper functiions
     use crate::graph_construction::*;
     use rand::Rng;
     use std::cmp::Reverse;
@@ -211,20 +221,23 @@ mod routing {       //routing algorithms and helper functiions
     use std::rc::Rc;
     use std::u64::MAX;
 
-    pub struct Dijkstra {       //handle dijkstra calculations
+    pub struct Dijkstra {
+        //handle dijkstra calculations
         pub graph: RoadNetwork,
         pub visited_nodes: HashSet<i64>,
     }
 
     #[derive(Debug, PartialEq, Clone, Eq, PartialOrd, Ord)]
-    pub struct PathedNode {         //node that references parent nodes, used to create path from goal node to start node
-        node_self: Node,
-        distance_from_start: u64,
-        parent_node: Option<Rc<PathedNode>>,
+    pub struct PathedNode {
+        //node that references parent nodes, used to create path from goal node to start node
+        pub node_self: Node,
+        pub distance_from_start: u64,
+        pub parent_node: Option<Rc<PathedNode>>,
     }
 
     impl PathedNode {
-        pub fn extract_parent<PathedNode: std::clone::Clone>(       //returns parent of a pathed node
+        pub fn extract_parent<PathedNode: std::clone::Clone>(
+            //returns parent of a pathed node
             last_elem: Rc<PathedNode>,
         ) -> PathedNode {
             let inner: PathedNode = Rc::unwrap_or_clone(last_elem);
@@ -232,14 +245,30 @@ mod routing {       //routing algorithms and helper functiions
         }
     }
 
-    pub fn heuristic_costs(target: i64) -> HashMap<i64, u64>{
-        let heuristics = HashMap::new();
+    pub fn a_star_heuristic(graph: &RoadNetwork, target: i64) -> HashMap<i64, u64> {
+        let tail = *graph.nodes.get(&target).unwrap();
         //for each current i64 id, enter euciladan distance from current to target, divided by max speed on that path
-
+        let heuristics = graph
+            .nodes
+            .iter()
+            .map(|(id, head)| {
+                (
+                    *id,
+                    ((i128::pow(((head.lat - tail.lat) * 111229).into(), 2) as f64
+                        / f64::powi(10.0, 14)
+                        + i128::pow(((head.lon - tail.lon) * 71695).into(), 2) as f64
+                            / f64::powi(10.0, 14))
+                    .sqrt() as u64)
+                        / ((110 as f64) * 5.0 / 18.0) as u64, //110 is motorway speed --> max speed possible on road network
+                )
+            })
+            .collect::<HashMap<i64, u64>>();
+        //println!("to {} is distance est {:?}", target, heuristics.clone().into_values());
         heuristics
     }
 
-    impl Dijkstra {          //implementation of dijkstra's shortest path algorithm
+    impl Dijkstra {
+        //implementation of dijkstra's shortest path algorithm
         pub fn new(graph: &RoadNetwork) -> Self {
             let visited_nodes = HashSet::new();
             Self {
@@ -247,8 +276,9 @@ mod routing {       //routing algorithms and helper functiions
                 visited_nodes,
             }
         }
-        
-        pub fn get_neighbors(&mut self, current: &PathedNode) -> Vec<(PathedNode, u64)> {       //return node id of neighbors
+
+        pub fn get_neighbors(&mut self, current: &PathedNode) -> Vec<(PathedNode, u64)> {
+            //return node id of neighbors
             let mut paths = Vec::new();
             let mut next_node_edges = HashMap::new();
             if let Some(connections) = self.graph.edges.get(&current.node_self.id) {
@@ -269,8 +299,8 @@ mod routing {       //routing algorithms and helper functiions
             paths
         }
 
-        
-        pub fn get_path(&mut self, target: PathedNode) -> (Vec<Node>, u64) {        //uses reference to find the source node with parent_node == None
+        pub fn get_path(&mut self, target: PathedNode) -> (Vec<Node>, u64) {
+            //uses reference to find the source node with parent_node == None
             let mut shortest_path: Vec<Node> = Vec::new();
             let mut total_distance: u64 = target.distance_from_start;
             let mut current = target;
@@ -282,7 +312,12 @@ mod routing {       //routing algorithms and helper functiions
             (shortest_path, total_distance)
         }
 
-        pub fn dijkstra(&mut self, source_id: i64, target_id: i64, heuristics: HashMap<i64, u64>) -> Option<(Vec<Node>, u64)> {
+        pub fn dijkstra(
+            &mut self,
+            source_id: i64,
+            target_id: i64,
+            heuristics: &HashMap<i64, u64>,
+        ) -> Option<(Vec<Node>, u64)> {
             //Heap(distance, node), Reverse turns binaryheap into minheap (default is maxheap)
             let mut priority_queue: BinaryHeap<Reverse<(u64, PathedNode)>> = BinaryHeap::new();
             //set target (-1) for all-node-settle rather than just target settle or smth
@@ -292,12 +327,15 @@ mod routing {       //routing algorithms and helper functiions
                 .nodes
                 .get(&source_id)
                 .unwrap_or_else(|| panic!("source node not found"));
-            
+
             let source_node: PathedNode = PathedNode {
                 node_self: (source),
                 distance_from_start: 0,
                 parent_node: (None),
             };
+
+            priority_queue.push(Reverse((0, source_node.clone())));
+
             let mut target: Node = Node {
                 id: 0,
                 lon: 0,
@@ -305,13 +343,11 @@ mod routing {       //routing algorithms and helper functiions
             };
             if target_id > 0 {
                 target = *self
-                .graph
-                .nodes
-                .get(&target_id)
-                .unwrap_or_else(|| panic!("source node not found"));
+                    .graph
+                    .nodes
+                    .get(&target_id)
+                    .unwrap_or_else(|| panic!("source node not found"));
             }
-
-            priority_queue.push(Reverse((0, source_node.clone())));
 
             let mut counter = 1;
             while !priority_queue.is_empty() {
@@ -335,9 +371,17 @@ mod routing {       //routing algorithms and helper functiions
                             distance_from_start: temp_distance,
                             parent_node: Some(prev_node),
                         };
-                        priority_queue.push(Reverse((temp_distance + 
-                            heuristics.get(&neighbor_node.0.node_self.id).unwrap_or_default(), tentative_new_node)));
-                            //sort nodes in PQ by f score rather than g score, but still choses neighbor based on g score
+                        priority_queue.push(Reverse((
+                            temp_distance
+                                + *heuristics.get(&neighbor_node.0.node_self.id).unwrap_or(&0),
+                            tentative_new_node,
+                        )));
+                        //println!(
+                        //    "compare {} plus {}",
+                        //    temp_distance,
+                        //    *heuristics.get(&neighbor_node.0.node_self.id).unwrap_or(&0)
+                        //);
+                        //sort nodes in PQ by f score rather than g score, but still choses neighbor based on g score
                     }
                 }
                 counter = counter + 1;
@@ -345,7 +389,8 @@ mod routing {       //routing algorithms and helper functiions
             None
         }
 
-        pub fn get_random_node_id(&mut self) -> Option<i64> {       //returns ID of a random valid node from a graph
+        pub fn get_random_node_id(&mut self) -> Option<i64> {
+            //returns ID of a random valid node from a graph
             let mut rng = rand::thread_rng();
             let mut full_node_list = Vec::new();
             for node in &self.graph.nodes {
@@ -357,10 +402,11 @@ mod routing {       //routing algorithms and helper functiions
             Some(**node_id)
         }
 
-        pub fn get_unvisted_node_id(        //returns the first unvisted node that function parses upon (used to find largest connected component)
+        pub fn get_unvisted_node_id(
+            //returns the first unvisted node that function parses upon (used to find largest connected component)
             &mut self,
             other_located_nodes: &HashMap<i64, i32>,
-            ) -> Option<i64> {
+        ) -> Option<i64> {
             if other_located_nodes.len() == self.graph.nodes.len() {
                 println!("all nodes visted");
                 return None;
@@ -382,15 +428,152 @@ mod routing {       //routing algorithms and helper functiions
     }
 }
 
+mod landmark_algo {
+    use crate::graph_construction::*;
+    use crate::routing::*;
+    use core::cmp::Reverse;
+    use std::collections::BinaryHeap;
+    use std::collections::HashMap;
+    use std::rc::Rc;
+    /*
+    pub struct LandmarkAlgo {
+        landmarks: Vec<i64>,
+        distances_to_landmarks: HashMap<i64, u64>,
+    }
+
+    impl LandmarkAlgo {
+        pub fn new(graph: &mut Dijkstra, num_landmarks: usize) -> Self {
+            LandmarkAlgo {
+                landmarks: Self::select_landmarks(graph, num_landmarks),
+                distances_to_landmarks: HashMap::new(),
+            }
+        } */
+
+    pub fn set_dijkstra(dijkstra_graph: &mut Dijkstra, node_set: &Vec<i64>, target_id: i64) -> u64 {
+        //Heap(distance, node), Reverse turns binaryheap into minheap (default is maxheap)
+        let mut priority_queue: BinaryHeap<Reverse<(u64, PathedNode)>> = BinaryHeap::new();
+        //set target (-1) for all-node-settle rather than just target settle or smth
+
+        for id in node_set {
+            //pushes all nodes in set into PQ with distance 0
+            let node_from_set = *dijkstra_graph
+                .graph
+                .nodes
+                .get(&id)
+                .unwrap_or_else(|| panic!("node {} not found, now length is {}", id, node_set.len()));
+
+            let pathed_node_from_set: PathedNode = PathedNode {
+                node_self: (node_from_set),
+                distance_from_start: 0,
+                parent_node: (None),
+            };
+            priority_queue.push(Reverse((0, pathed_node_from_set.clone())));
+        }
+
+        let mut counter = 1;
+        while !priority_queue.is_empty() {
+            let pathed_current_node = priority_queue.pop().unwrap().0 .1; //.0 "unwraps" from Reverse()
+            if !(dijkstra_graph
+                .visited_nodes
+                .insert(pathed_current_node.node_self.id))
+            {
+                continue;
+            }
+
+            if pathed_current_node.node_self.id.eq(&target_id) {
+                return dijkstra_graph.get_path(pathed_current_node).1;
+            }
+
+            for neighbor_node in dijkstra_graph.get_neighbors(&pathed_current_node) {
+                // something to check if node was already done stuff to and skip this whole thing if yes
+                let temp_distance = pathed_current_node.distance_from_start + neighbor_node.1;
+                let next_distance = neighbor_node.0.distance_from_start;
+                if temp_distance < next_distance {
+                    let prev_node: Rc<PathedNode> = Rc::new(pathed_current_node.clone());
+                    let tentative_new_node = PathedNode {
+                        node_self: neighbor_node.0.node_self,
+                        distance_from_start: temp_distance,
+                        parent_node: Some(prev_node),
+                    };
+                    priority_queue.push(Reverse((temp_distance, tentative_new_node)));
+                }
+            }
+            counter = counter + 1;
+        }
+        0
+    }
+
+    pub fn select_landmarks(dijkstra_graph: &mut Dijkstra, num_landmarks: usize) -> Vec<i64> {
+        let mut node_set: Vec<i64> = Vec::new();
+        node_set.push(dijkstra_graph.get_random_node_id().unwrap()); //push random first node to start
+        let mut distance = 0;
+        let mut max_dist_node = -1;
+        while node_set.len() < num_landmarks {
+            let target_set = dijkstra_graph.graph.nodes.clone();
+            let target_ids = target_set.keys();
+            for target_id in target_ids {
+                let temp = set_dijkstra(dijkstra_graph, &node_set, *target_id);
+                if temp > distance {
+                    distance = temp;
+                    max_dist_node = *target_id
+                }
+            }
+            node_set.push(max_dist_node);
+        }
+        node_set
+    }
+
+    pub fn landmark_heuristic(
+        graph: &RoadNetwork,
+        target: i64,
+        landmarks: &Vec<i64>,
+    ) -> HashMap<i64, u64> {
+        let target = *graph.nodes.get(&target).unwrap();
+        let landmark_nodes = landmarks
+            .iter()
+            .map(|id| *graph.nodes.get(id).unwrap())
+            .collect::<Vec<Node>>();
+        //for each current i64 id, enter euciladan distance from current to target, divided by max speed on that path
+        let heuristics =
+            graph
+                .nodes
+                .iter()
+                .map(|(id, head)| {
+                    (
+                        *id,landmark_nodes.iter().map(|landmark|
+                        (((i128::pow(((head.lat - landmark.lat) * 111229).into(), 2) as f64
+                            / f64::powi(10.0, 14)
+                            + i128::pow(((head.lon - landmark.lon) * 71695).into(), 2) as f64
+                                / f64::powi(10.0, 14))
+                        .sqrt() as u64)
+                            / ((110 as f64) * 5.0 / 18.0) as u64) //110 is motorway speed --> max speed possible on road network
+                            .abs_diff(((i128::pow(((landmark.lat - target.lat) * 111229).into(), 2) as f64
+                        / f64::powi(10.0, 14)
+                        + i128::pow(((landmark.lon - target.lon) * 71695).into(), 2) as f64
+                            / f64::powi(10.0, 14))
+                    .sqrt() as u64)
+                        / ((110 as f64) * 5.0 / 18.0) as u64) //110 is motorway speed --> max speed possible on road network
+                    ).max().unwrap()
+                    )
+                })
+                .collect::<HashMap<i64, u64>>();
+        //println!("to {} is distance est {:?}", target, heuristics.clone().into_values());
+        heuristics
+    }
+
+    //pub fn computeShortestPath(source: i64, target: i64) -> Option<(Vec<Node>, u64)>
+    //}
+}
 fn main() {}
 
 #[cfg(test)]
 mod tests {
     use crate::graph_construction::*;
+    use crate::landmark_algo::*;
     use crate::routing::*;
-    use std::collections::HashMap;
+    //use std::collections::HashMap;
     ///*  
-    use std::time::Instant;  
+    use std::time::Instant;
     #[test]
     fn run_algo() {
         //let path = "bw.pbf";
@@ -398,7 +581,12 @@ mod tests {
         let path = "saarland.pbf";
         let data = RoadNetwork::read_from_osm_file(path).unwrap();
         let mut roads = RoadNetwork::new(data.0, data.1);
-        println!("{} Base Graph Nodes: {}, Edges: {}", path, roads.nodes.len(), roads.edges.len());
+        println!(
+            "{} Base Graph Nodes: {}, Edges: {}",
+            path,
+            roads.nodes.len(),
+            roads.edges.len()
+        );
         roads = roads.reduce_to_largest_connected_component();
         println!(
             "reduced map nodes {}, and edges {}",
@@ -414,20 +602,28 @@ mod tests {
         let mut shortest_path_costs = Vec::new();
         let mut query_time = Vec::new();
         let mut settled_nodes = Vec::new();
-        //to do a star, uncomment
-        let heuristics = HashMap::new();
-        heuristic_costs(target_id); //sets heurstic values to either 0 for dijkstra or h(u, t) for a*
 
-        for _ in 0..100 {
+        //let mut heuristics = HashMap::new(); //empty hashmap for dijkstra
+        let mut heuristics;
+        let now = Instant::now();
+        let landmark_list = select_landmarks(&mut routing_graph, 42);
+        println!("time to compute landmarks: {}", now.elapsed().as_millis() as f32 * 0.001);
+        let mut time;
+
+        for _ in 0..100 { 
             let source = routing_graph.get_random_node_id().unwrap();
             let target = routing_graph.get_random_node_id().unwrap();
-            let now = Instant::now();
+            //heuristics = a_star_heuristic(&roads, target); //sets heurstic values for a*, comment out for base Dijkstra
+            heuristics = landmark_heuristic(&roads, target, &landmark_list); //a* with landmarks
             routing_graph = Dijkstra::new(&roads);
-            let result = routing_graph.dijkstra(source, target, true);
-            query_time.push(now.elapsed().as_millis() as f32 * 0.001);
+            let now = Instant::now();
+            let result = routing_graph.dijkstra(source, target, &heuristics);
+            time = now.elapsed().as_millis() as f32 * 0.001;
+            query_time.push(time);
             shortest_path_costs.push(result.unwrap_or((vec![], 0)).1);
             settled_nodes.push(routing_graph.visited_nodes.len() as u64);
         }
+        
         println!(
             "average cost in minutes {}",
             shortest_path_costs.iter().sum::<u64>() / shortest_path_costs.len() as u64 / 60
