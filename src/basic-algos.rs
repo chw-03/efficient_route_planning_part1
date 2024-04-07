@@ -376,12 +376,6 @@ mod routing {
                                 + *heuristics.get(&neighbor_node.0.node_self.id).unwrap_or(&0),
                             tentative_new_node,
                         )));
-                        //println!(
-                        //    "compare {} plus {}",
-                        //    temp_distance,
-                        //    *heuristics.get(&neighbor_node.0.node_self.id).unwrap_or(&0)
-                        //);
-                        //sort nodes in PQ by f score rather than g score, but still choses neighbor based on g score
                     }
                 }
                 counter = counter + 1;
@@ -548,20 +542,25 @@ mod landmark_algo {
     }
     */
     
-    pub fn landmark_heuristic(mut dijkstra_graph: Dijkstra, num_landmarks: usize, target: i64) -> HashMap<i64, u64> {
+    pub fn landmark_heuristic_precompute(dijkstra_graph: &mut Dijkstra, num_landmarks: usize) -> HashMap<i64, Vec<u64>> {
+        let graph = dijkstra_graph.graph.clone();
         let empty_hash = HashMap::new();
-        let node_list = dijkstra_graph.graph.nodes.clone();
+        let node_list = graph.nodes.clone();
         let mut landmarks = Vec::new();
-        for i in 0..num_landmarks {
+        for _ in 0..num_landmarks {
             landmarks.push(dijkstra_graph.get_random_node_id().unwrap());
         }
-        node_list.into_iter().map(|(current,_)| (current, 
-            landmarks.iter().map(|l| {
-                dijkstra_graph.dijkstra(*l, current, &empty_hash).unwrap().1
-                .abs_diff(dijkstra_graph.dijkstra(*l, target, &empty_hash).unwrap().1)
-            }).max().unwrap()
-        )).collect::<HashMap<i64, u64>>()
+        landmarks.into_iter().map(|l| (l, 
+            node_list.iter().map(|(&node_u, _)| {
+                Dijkstra::new(&graph).dijkstra(l, node_u, &empty_hash).unwrap().1
+            }).collect::<Vec<u64>>()
+        )).collect::<HashMap<i64, Vec<u64>>>()
     }
+
+    pub fn landmark_heuristic(h_score_by_landmark: HashMap<i64, Vec<u64>>) -> HashMap<i64, u64> {
+        
+    }
+
 }
 fn main() {}
 
@@ -601,20 +600,16 @@ mod tests {
         let mut shortest_path_costs = Vec::new();
         let mut query_time = Vec::new();
         let mut settled_nodes = Vec::new();
-
-        //let mut heuristics = HashMap::new(); //empty hashmap for dijkstra
         let mut heuristics;
-        let now = Instant::now();
-        //let landmark_list = select_landmarks(&mut routing_graph, 42);
-        //println!("time to compute landmarks: {}", now.elapsed().as_millis() as f32 * 0.001);
         let mut time;
+        let precompute = landmark_heuristic_precompute(&mut routing_graph, 42); //i think i did it the hard way with greedy the first time
 
-        for _ in 0..100 { 
+        for _ in 0..2 { 
             let source = routing_graph.get_random_node_id().unwrap();
             let target = routing_graph.get_random_node_id().unwrap();
             //heuristics = a_star_heuristic(&roads, target); //sets heurstic values for a*, comment out for base Dijkstra
-            //heuristics = landmark_heuristic(&roads, target, &landmark_list); //a* with landmarks
-            heuristics = landmark_heuristic(routing_graph, 42, target); //i think i did it the hard way with greedy the first time
+            //heuristics = landmark_heuristic(&roads, target, &landmark_list); //a* with landmarks on greedy pick
+            
             routing_graph = Dijkstra::new(&roads);
             let now = Instant::now();
             let result = routing_graph.dijkstra(source, target, &heuristics);
