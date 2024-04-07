@@ -435,19 +435,6 @@ mod landmark_algo {
     use std::collections::BinaryHeap;
     use std::collections::HashMap;
     use std::rc::Rc;
-    /*
-    pub struct LandmarkAlgo {
-        landmarks: Vec<i64>,
-        distances_to_landmarks: HashMap<i64, u64>,
-    }
-
-    impl LandmarkAlgo {
-        pub fn new(graph: &mut Dijkstra, num_landmarks: usize) -> Self {
-            LandmarkAlgo {
-                landmarks: Self::select_landmarks(graph, num_landmarks),
-                distances_to_landmarks: HashMap::new(),
-            }
-        } */
 
     pub fn set_dijkstra(dijkstra_graph: &mut Dijkstra, node_set: &Vec<i64>, target_id: i64) -> u64 {
         //Heap(distance, node), Reverse turns binaryheap into minheap (default is maxheap)
@@ -560,9 +547,6 @@ mod landmark_algo {
         //println!("to {} is distance est {:?}", target, heuristics.clone().into_values());
         heuristics
     }
-
-    //pub fn computeShortestPath(source: i64, target: i64) -> Option<(Vec<Node>, u64)>
-    //}
 }
 fn main() {}
 
