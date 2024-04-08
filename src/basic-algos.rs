@@ -538,66 +538,29 @@ mod landmark_algo {
     }
     */
 
-    pub fn landmark_heuristic_precompute(
-        dijkstra_graph: &mut Dijkstra,
-        num_landmarks: usize,
-    ) -> Vec<(i64, u64)> {
+     pub fn landmark_heuristic_precompute(dijkstra_graph: &mut Dijkstra, num_landmarks: usize) -> HashMap<i64, HashMap<i64, u64>> {
         let roads = dijkstra_graph.graph.clone();
         let empty_hash = HashMap::new();
-        let mut results = Vec::new();
+        let mut landmarks = Vec::new();
         for _ in 0..num_landmarks {
-            let l = dijkstra_graph.get_random_node_id().unwrap();
+            landmarks.push(dijkstra_graph.get_random_node_id().unwrap());
+        }
+         
+        landmarks.iter().map(|&l| (l, {
             let mut graph = Dijkstra::new(&roads);
             graph.dijkstra(l, -1, &empty_hash);
-            results.append(
-                &mut graph
-                    .visited_nodes
-                    .iter()
-                    .map(|(id, dist)| (*id, *dist))
-                    .collect(),
-            );
-        }
-        results
+            graph.visited_nodes.iter().map(|(id, dist)| (*id, *dist)).collect()
+    })).collect::<HashMap<i64, HashMap<i64, u64>>>() //landmark_id, node_id, distance
     }
 
-    pub fn landmark_heuristic(
-        landmark_precompute: &Vec<(i64, u64)>,
-        dijkstra_graph: &Dijkstra,
-        target: i64,
-    ) -> HashMap<i64, u64> {
-        let spacing = dijkstra_graph.graph.nodes.len() - 1;
-        let target_distances = landmark_precompute
-            .iter()
-            .filter(|(id, _)| *id == target)
-            .map(|(_, dist)| *dist)
-            .collect::<Vec<u64>>();
-        let mut node_index = 0;
-        let result: HashMap<i64, u64> = dijkstra_graph
-            .graph
-            .nodes
-            .iter()
-            .filter(|(id, _)| **id != target)
-            .map(|(source, _)| {
-                (*source, {
-                    let mut index = 0;
-                    let val = landmark_precompute
-                        .iter()
-                        .filter(|(id, _)| *id != target)
-                        .skip(node_index)
-                        .step_by(spacing)
-                        .map(|(_, dist)| {
-                            let val = dist.abs_diff(target_distances[index]);
-                            index = index + 1;
-                            val
-                        })
-                        .max()
-                        .unwrap();
-                    node_index = node_index + 1;
-                    val
-                })
-            })
-            .collect();
-        result
+    pub fn landmark_heuristic(landmark_precompute: &HashMap<i64, HashMap<i64, u64>>, dijkstra_graph: &Dijkstra, target: i64) -> HashMap<i64, u64> {
+        dijkstra_graph.graph.nodes.iter().map(|(source, _)| (*source, {
+            landmark_precompute.iter().map(|(_, &ref arr)| {
+                let dist_lu = *arr.get(source).unwrap();
+                let dist_tu = *arr.get(&target).unwrap();
+                dist_lu.abs_diff(dist_tu)
+            }).max().unwrap()
+        })).collect()
     }
 }
 
@@ -614,9 +577,9 @@ mod tests {
     use std::time::Instant;
     #[test]
     fn run_algo() {
-        //let path = "bw.pbf";
+        let path = "bw.pbf";
         //let path = "uci.pbf";
-        let path = "saarland.pbf";
+        //let path = "saarland.pbf";
         let data = RoadNetwork::read_from_osm_file(path).unwrap();
         let mut roads = RoadNetwork::new(data.0, data.1);
         println!(
