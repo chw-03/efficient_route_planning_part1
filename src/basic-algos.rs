@@ -26,7 +26,7 @@ mod graph_construction {
     pub struct RoadNetwork {
         //graph struct that will be used to route
         pub nodes: HashMap<i64, Node>,              // <node.id, node>
-        pub edges: HashMap<i64, HashMap<i64, u64>>, // tail.id, <head.id, cost>
+        pub edges: HashMap<i64, HashMap<i64, (u64, bool)>>, // tail.id, <head.id, (cost, arcflag)>
         pub raw_ways: Vec<Way>,
     }
 
@@ -55,7 +55,7 @@ mod graph_construction {
     impl RoadNetwork {
         pub fn new(mut nodes: HashMap<i64, Node>, ways: Vec<Way>) -> Self {
             //init new RoadNetwork based on results from reading .pbf file
-            let mut edges: HashMap<i64, HashMap<i64, u64>> = HashMap::new();
+            let mut edges: HashMap<i64, HashMap<i64, (u64, bool)>> = HashMap::new();
             //println!("# of ways {}", ways.len());
             for way in ways.clone() {
                 let mut previous_head_node_now_tail: Option<&Node> = None;
@@ -80,25 +80,25 @@ mod graph_construction {
                             / f64::powi(10.0, 14);
                         let c = (a + b).sqrt();
                         let cost = (c as u64) / ((way.speed as f64) * 5.0 / 18.0) as u64; //seconds needed to traverse segment based on road type
-                                                                                          //println!("segment length {} and time {}", c, cost);
+                        let flag = false;
                         edges
                             .entry(tail_id)
                             .and_modify(|inner| {
-                                inner.insert(head_id, cost);
+                                inner.insert(head_id, (cost, flag));
                             })
                             .or_insert({
                                 let mut a = HashMap::new();
-                                a.insert(head_id, cost);
+                                a.insert(head_id, (cost, flag));
                                 a
                             });
                         edges
                             .entry(head.id)
                             .and_modify(|inner| {
-                                inner.insert(tail_id, cost);
+                                inner.insert(tail_id, (cost, flag));
                             })
                             .or_insert({
                                 let mut a = HashMap::new();
-                                a.insert(tail_id, cost);
+                                a.insert(tail_id, (cost, flag));
                                 a
                             });
                         previous_head_node_now_tail = Some(&head);
@@ -173,7 +173,7 @@ mod graph_construction {
             {
                 counter = counter + 1;
                 let mut shortest_path_graph = Dijkstra::new(&self);
-                shortest_path_graph.dijkstra(source_id, -1, &heuristics);
+                shortest_path_graph.dijkstra(source_id, -1, &heuristics, false);
                 for (node, _) in &shortest_path_graph.visited_nodes {
                     number_times_node_visted.insert(*node, counter);
                 }
@@ -278,7 +278,9 @@ mod routing {
             }
         }
 
-        pub fn get_neighbors(&mut self, current: &PathedNode) -> Vec<(PathedNode, u64)> {
+
+        //to-do: block off arcs that have false arc flag
+        pub fn get_neighbors(&mut self, current: &PathedNode, consider_arc_flags: bool) -> Vec<(PathedNode, u64)> {
             //return node id of neighbors
             let mut paths = Vec::new();
             let mut next_node_edges = HashMap::new();
@@ -294,7 +296,7 @@ mod routing {
                         distance_from_start: MAX,
                         parent_node: Some(current.clone()),
                     },
-                    path.1,
+                    path.1.0,
                 ));
             }
             paths
@@ -318,6 +320,7 @@ mod routing {
             source_id: i64,
             target_id: i64,
             heuristics: &HashMap<i64, u64>,
+            consider_arc_flags: bool
         ) -> Option<(Vec<Node>, u64)> {
             //Heap(distance, node), Reverse turns binaryheap into minheap (default is maxheap)
             let mut priority_queue: BinaryHeap<Reverse<(u64, PathedNode)>> = BinaryHeap::new();
@@ -364,7 +367,7 @@ mod routing {
                     return Some(self.get_path(pathed_current_node));
                 }
 
-                for neighbor_node in self.get_neighbors(&pathed_current_node) {
+                for neighbor_node in self.get_neighbors(&pathed_current_node, consider_arc_flags) {
                     // something to check if node was already done stuff to and skip this whole thing if yes
                     let temp_distance = pathed_current_node.distance_from_start + neighbor_node.1;
                     let next_distance = neighbor_node.0.distance_from_start;
@@ -457,7 +460,7 @@ mod routing {
                     return Some(self.get_path(pathed_current_node).1);
                 }
 
-                for neighbor_node in self.get_neighbors(&pathed_current_node) {
+                for neighbor_node in self.get_neighbors(&pathed_current_node, false) {
                     // something to check if node was already done stuff to and skip this whole thing if yes
                     let temp_distance = pathed_current_node.distance_from_start + neighbor_node.1;
                     let next_distance = neighbor_node.0.distance_from_start;
@@ -538,32 +541,104 @@ mod landmark_algo {
     }
     */
 
-     pub fn landmark_heuristic_precompute(dijkstra_graph: &mut Dijkstra, num_landmarks: usize) -> HashMap<i64, HashMap<i64, u64>> {
+    pub fn landmark_heuristic_precompute(
+        dijkstra_graph: &mut Dijkstra,
+        num_landmarks: usize,
+    ) -> HashMap<i64, HashMap<i64, u64>> {
         let roads = dijkstra_graph.graph.clone();
         let empty_hash = HashMap::new();
         let mut landmarks = Vec::new();
         for _ in 0..num_landmarks {
             landmarks.push(dijkstra_graph.get_random_node_id().unwrap());
         }
-         
-        landmarks.iter().map(|&l| (l, {
-            let mut graph = Dijkstra::new(&roads);
-            graph.dijkstra(l, -1, &empty_hash);
-            graph.visited_nodes.iter().map(|(id, dist)| (*id, *dist)).collect()
-    })).collect::<HashMap<i64, HashMap<i64, u64>>>() //landmark_id, node_id, distance
+
+        landmarks
+            .iter()
+            .map(|&l| {
+                (l, {
+                    let mut graph = Dijkstra::new(&roads);
+                    graph.dijkstra(l, -1, &empty_hash, false);
+                    graph
+                        .visited_nodes
+                        .iter()
+                        .map(|(id, dist)| (*id, *dist))
+                        .collect()
+                })
+            })
+            .collect::<HashMap<i64, HashMap<i64, u64>>>() //landmark_id, node_id, distance
     }
 
-    pub fn landmark_heuristic(landmark_precompute: &HashMap<i64, HashMap<i64, u64>>, dijkstra_graph: &Dijkstra, target: i64) -> HashMap<i64, u64> {
-        dijkstra_graph.graph.nodes.iter().map(|(source, _)| (*source, {
-            landmark_precompute.iter().map(|(_, &ref arr)| {
-                let dist_lu = *arr.get(source).unwrap();
-                let dist_tu = *arr.get(&target).unwrap();
-                dist_lu.abs_diff(dist_tu)
-            }).max().unwrap()
-        })).collect()
+    pub fn landmark_heuristic(
+        landmark_precompute: &HashMap<i64, HashMap<i64, u64>>,
+        dijkstra_graph: &Dijkstra,
+        target: i64,
+    ) -> HashMap<i64, u64> {
+        dijkstra_graph
+            .graph
+            .nodes
+            .iter()
+            .map(|(source, _)| {
+                (*source, {
+                    landmark_precompute
+                        .iter()
+                        .map(|(_, &ref arr)| {
+                            let dist_lu = *arr.get(source).unwrap();
+                            let dist_tu = *arr.get(&target).unwrap();
+                            dist_lu.abs_diff(dist_tu)
+                        })
+                        .max()
+                        .unwrap()
+                })
+            })
+            .collect()
     }
 }
 
+mod arc_flags_algo {
+    use crate::graph_construction::*;
+    use crate::routing::*;
+
+    pub struct ArcFlags {
+        //precomputation stuff for arc flag routing algorithm
+        lat_min: i64,
+        lat_max: i64, 
+        lon_min: i64,
+        lon_max: i64
+    }
+
+    impl ArcFlags {
+        pub fn new(lat_min: f32, lat_max: f32, lon_min: f32, lon_max: f32) -> ArcFlags {
+            ArcFlags{
+                lat_min: (lat_min * f32::powi(10.0, 7)) as i64,
+                lat_max: (lat_max * f32::powi(10.0, 7)) as i64,
+                lon_min: (lon_min * f32::powi(10.0, 7)) as i64,
+                lon_max: (lon_max * f32::powi(10.0, 7)) as i64,
+            }
+        }
+        pub fn arc_flags_precompute(self, mut routing_graph: Dijkstra) {
+            let region_nodes = routing_graph.graph.nodes.iter().filter(|(_,&node)| node.lat < self.lat_max && node.lat> self.lat_min && node.lon < self.lon_max && node.lon > self.lon_min).map(|(id, _)| *id).collect::<Vec<i64>>();
+            let mut boundary_node = Vec::new();
+            for node in region_nodes.clone() {
+                if let Some(ref edge_list) = routing_graph.graph.edges.get(&node) {
+                    for edge in **edge_list {
+                        if region_nodes.contains(edge.0) {
+                            edge.1.1 = true;
+                        }
+                        else {
+                            boundary_node.push(node);
+
+                        }
+                    }
+                }
+            }
+            for node in boundary_node {
+
+            }
+            //region_nodes.iter().map(|(id, _)| routing_graph.graph.edges.get(*id).unwrap()); 
+        }
+    }
+
+}
 fn main() {}
 
 #[cfg(test)]
@@ -574,12 +649,13 @@ mod tests {
 
     //use std::collections::HashMap;
 
+    use std::collections::HashMap;
     use std::time::Instant;
     #[test]
     fn run_algo() {
-        let path = "bw.pbf";
+        //let path = "bw.pbf";
         //let path = "uci.pbf";
-        //let path = "saarland.pbf";
+        let path = "saarland.pbf";
         let data = RoadNetwork::read_from_osm_file(path).unwrap();
         let mut roads = RoadNetwork::new(data.0, data.1);
         println!(
@@ -605,18 +681,19 @@ mod tests {
         let mut settled_nodes = Vec::new();
         let mut heuristics;
         let now = Instant::now();
-        let precompute = landmark_heuristic_precompute(&mut routing_graph, 42); //i think i did it the hard way with greedy the first time
+        //let precompute = landmark_heuristic_precompute(&mut routing_graph, 42); //i think i did it the hard way with greedy the first time
         let mut time = now.elapsed().as_millis() as f32 * 0.001;
         println!("pre done {}", time);
         for _ in 0..100 {
             let source = routing_graph.get_random_node_id().unwrap();
             let target = routing_graph.get_random_node_id().unwrap();
+            heuristics = HashMap::new();
             //heuristics = a_star_heuristic(&roads, target); //sets heurstic values for a*, comment out for base Dijkstra
             //heuristics = landmark_heuristic(&roads, target, &landmark_list); //a* with landmarks on greedy pick
-            heuristics = landmark_heuristic(&precompute, &routing_graph, target);
+            //heuristics = landmark_heuristic(&precompute, &routing_graph, target);
             routing_graph = Dijkstra::new(&roads);
             let now = Instant::now();
-            let result = routing_graph.dijkstra(source, target, &heuristics);
+            let result = routing_graph.dijkstra(source, target, &heuristics, false);
             time = now.elapsed().as_millis() as f32 * 0.001;
             query_time.push(time);
             shortest_path_costs.push(result.unwrap_or((vec![], 0)).1);
