@@ -278,22 +278,39 @@ mod routing {
             }
         }
 
-        //to-do: block off arcs that have false arc flag
+        pub fn set_arc_flags(&mut self, current: &PathedNode) {
+            let mut sets_of_nodes_for_edge: Vec<(i64, i64)> = Vec::new();
+            //need some case to handle neighbor to parent instead of just parent to neighbor
+            if let Some(connections) = self.graph.edges.get_mut(&current.node_self.id) {
+                let mut neighbor_id: i64 = 0;
+                //print!("hh{}", connections.len());
+                for (n_id, (_, arcflag)) in connections.iter_mut() {
+                    neighbor_id = *n_id;
+                    *arcflag = true;
+                    sets_of_nodes_for_edge.push((current.node_self.id, neighbor_id));
+                }
+            }
+
+            for pair in sets_of_nodes_for_edge {
+                let _ = self.graph.edges.entry(pair.1).and_modify(|edge| {
+                    if let Some((_, flag)) = edge.get_mut(&pair.0) {
+                        *flag = true;
+                    }
+                });
+            }
+        }
+
         pub fn get_neighbors(
             &mut self,
             current: &PathedNode,
-            consider_arc_flags: bool,
             set_arc_flags: bool,
+            consider_arc_flags: bool,
         ) -> Vec<(PathedNode, u64)> {
             //return node id of neighbors
             let mut paths = Vec::new();
             let mut next_node_edges = HashMap::new();
+            //need some case to handle neighbor to parent instead of just parent to neighbor
             if let Some(connections) = self.graph.edges.get_mut(&current.node_self.id) {
-                if set_arc_flags {
-                    let _ = connections.iter_mut().map(|(_, (_, arcflag))| {
-                        *arcflag = true;
-                    });
-                }
                 next_node_edges = connections.clone();
             }
             let current: Rc<PathedNode> = Rc::new(current.clone());
@@ -384,8 +401,12 @@ mod routing {
                     return Some(self.get_path(pathed_current_node));
                 }
 
+                if set_arc_flags {
+                    self.set_arc_flags(&pathed_current_node);
+                }
+
                 for neighbor_node in
-                    self.get_neighbors(&pathed_current_node, consider_arc_flags, set_arc_flags)
+                    self.get_neighbors(&pathed_current_node, set_arc_flags, consider_arc_flags)
                 {
                     // something to check if node was already done stuff to and skip this whole thing if yes
                     let temp_distance = pathed_current_node.distance_from_start + neighbor_node.1;
@@ -719,7 +740,6 @@ mod tests {
     }
 
     /*
-
         /*
     #[test]
     fn testing_weird_iter_stuff() {
