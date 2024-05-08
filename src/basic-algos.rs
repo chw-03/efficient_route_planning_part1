@@ -184,7 +184,6 @@ mod graph_construction {
             let mut new_node_list = Vec::new();
             new_node_list = number_times_node_visted
                 .iter()
-                .map(|(node, counter)| (node, counter))
                 .collect();
             new_node_list.sort_by(|(node1, counter1), (node2, counter2)| counter1.cmp(counter2));
 
@@ -261,7 +260,7 @@ mod routing {
                         + i128::pow(((head.lon - tail.lon) * 71695).into(), 2) as f64
                             / f64::powi(10.0, 14))
                     .sqrt() as u64)
-                        / ((110 as f64) * 5.0 / 18.0) as u64, //110 is motorway speed --> max speed possible on road network
+                        / ((110_f64) * 5.0 / 18.0) as u64, //110 is motorway speed --> max speed possible on road network
                 )
             })
             .collect::<HashMap<i64, u64>>();
@@ -308,7 +307,7 @@ mod routing {
             let mut next_node_edges = HashMap::new();
             //need some case to handle neighbor to parent instead of just parent to neighbor
             if let Some(connections) = self.graph.edges.get_mut(&current.node_self.id) {
-                next_node_edges = connections.clone();
+                next_node_edges.clone_from(connections);
             }
             let current: Rc<PathedNode> = Rc::new(current.clone());
             for path in next_node_edges {
@@ -591,7 +590,7 @@ mod landmark_algo {
                 (*source, {
                     landmark_precompute
                         .iter()
-                        .map(|(_, &ref arr)| {
+                        .map(|(_, arr)| {
                             let dist_lu = *arr.get(source).unwrap();
                             let dist_tu = *arr.get(&target).unwrap();
                             dist_lu.abs_diff(dist_tu)
