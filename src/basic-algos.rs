@@ -101,7 +101,7 @@ mod graph_construction {
                                 a.insert(tail_id, (cost, flag));
                                 a
                             });
-                        previous_head_node_now_tail = Some(&head);
+                        previous_head_node_now_tail = Some(head);
                         previous_head_node_index = i + 1;
                     }
                 }
@@ -109,7 +109,7 @@ mod graph_construction {
             let node_to_remove = nodes
                 .iter()
                 .filter(|(node, _)| !edges.contains_key(node))
-                .map(|(x, _)| x.clone())
+                .map(|(x, _)| *x)
                 .collect::<Vec<i64>>();
             for node in &node_to_remove {
                 nodes.remove(node);
@@ -127,7 +127,7 @@ mod graph_construction {
             let mut nodes = HashMap::new();
             let mut ways = Vec::new();
             let path_cleaned = std::path::Path::new(&path);
-            let r = std::fs::File::open(&path_cleaned).unwrap();
+            let r = std::fs::File::open(path_cleaned).unwrap();
             let mut reader = osmpbfreader::OsmPbfReader::new(r);
             for obj in reader.iter().map(Result::unwrap) {
                 match obj {
@@ -171,10 +171,10 @@ mod graph_construction {
             while let Some(source_id) =
                 shortest_path_graph.get_unvisted_node_id(&number_times_node_visted)
             {
-                counter = counter + 1;
+                counter += 1;
                 let mut shortest_path_graph = Dijkstra::new(&self);
                 shortest_path_graph.dijkstra(source_id, -1, &heuristics, false, false, true);
-                for (node, _) in &shortest_path_graph.visited_nodes {
+                for node in shortest_path_graph.visited_nodes.keys() {
                     number_times_node_visted.insert(*node, counter);
                 }
                 if number_times_node_visted.len() > (self.nodes.len() / 2) {
@@ -221,6 +221,7 @@ mod routing {
     use std::collections::{BinaryHeap, HashMap, HashSet};
     use std::rc::Rc;
     use std::u64::MAX;
+    use std::time::Instant;
 
     pub struct Dijkstra {
         //handle dijkstra calculations
@@ -278,26 +279,22 @@ mod routing {
             }
         }
 
-        pub fn set_arc_flags(&mut self, current: &PathedNode) {
-            let mut sets_of_nodes_for_edge: Vec<(i64, i64)> = Vec::new();
-            //need some case to handle neighbor to parent instead of just parent to neighbor
-            if let Some(connections) = self.graph.edges.get_mut(&current.node_self.id) {
-                let mut neighbor_id: i64 = 0;
-                //print!("hh{}", connections.len());
-                for (n_id, (_, arcflag)) in connections.iter_mut() {
-                    neighbor_id = *n_id;
-                    *arcflag = true;
-                    sets_of_nodes_for_edge.push((current.node_self.id, neighbor_id));
-                }
-            }
-
-            for pair in sets_of_nodes_for_edge {
-                let _ = self.graph.edges.entry(pair.1).and_modify(|edge| {
-                    if let Some((_, flag)) = edge.get_mut(&pair.0) {
-                        *flag = true;
-                    }
+        pub fn set_arc_flags(&mut self, current: &PathedNode, neighbor: &PathedNode) {
+            self.graph
+                .edges
+                .entry(current.node_self.id)
+                .and_modify(|edge| {
+                    edge.entry(neighbor.node_self.id)
+                        .and_modify(|(_, arcflag)| *arcflag = true);
                 });
-            }
+
+            /*self.graph
+                .edges
+                .entry(neighbor.node_self.id)
+                .and_modify(|edge| {
+                    edge.entry(current.node_self.id)
+                        .and_modify(|(_, arcflag)| *arcflag = true);
+                });*/
         }
 
         pub fn get_neighbors(
@@ -315,13 +312,14 @@ mod routing {
             }
             let current: Rc<PathedNode> = Rc::new(current.clone());
             for path in next_node_edges {
-                if (!set_arc_flags && consider_arc_flags && !path.1 .1) {
+                if (consider_arc_flags && !path.1 .1) {
+                    print!("A");
                     continue;
                 }
                 let node_self: Node = *self.graph.nodes.get(&path.0).unwrap();
                 paths.push((
                     PathedNode {
-                        node_self: node_self,
+                        node_self,
                         distance_from_start: MAX,
                         parent_node: Some(current.clone()),
                     },
@@ -390,6 +388,8 @@ mod routing {
             let mut counter = 1;
             while !priority_queue.is_empty() {
                 let pathed_current_node = priority_queue.pop().unwrap().0 .1; //.0 "unwraps" from Reverse()
+                
+                //something to check if node was already done stuff to and skip this whole thing if yes
                 if let Some(_) = (self.visited_nodes.insert(
                     pathed_current_node.node_self.id,
                     pathed_current_node.distance_from_start,
@@ -401,14 +401,13 @@ mod routing {
                     return Some(self.get_path(pathed_current_node));
                 }
 
-                if set_arc_flags {
-                    self.set_arc_flags(&pathed_current_node);
-                }
-
                 for neighbor_node in
                     self.get_neighbors(&pathed_current_node, set_arc_flags, consider_arc_flags)
                 {
-                    // something to check if node was already done stuff to and skip this whole thing if yes
+                    //set arc flag if its boundary node compute
+                    if set_arc_flags {
+                        self.set_arc_flags(&pathed_current_node, &neighbor_node.0);
+                    }
                     let temp_distance = pathed_current_node.distance_from_start + neighbor_node.1;
                     let next_distance = neighbor_node.0.distance_from_start;
                     if temp_distance < next_distance {
@@ -425,7 +424,7 @@ mod routing {
                         )));
                     }
                 }
-                counter = counter + 1;
+                counter += 1;
             }
             None
         }
@@ -482,7 +481,6 @@ mod routing {
                 .map(|(id, _)| id)
                 .collect::<Vec<&i64>>();
 
-            //problem section
             for node in &self.graph.nodes {
                 if !other_located_nodes.contains(&node.0) {
                     return Some(*node.0);
@@ -493,6 +491,7 @@ mod routing {
     }
 }
 
+#[allow(dead_code)]
 mod landmark_algo {
     use crate::routing::*;
     use std::collections::HashMap;
@@ -609,12 +608,13 @@ mod arc_flags_algo {
     use crate::routing::*;
     use core::ops::Range;
     use std::collections::HashMap;
+    use std::collections::HashSet;
     pub struct ArcFlags {
         //precomputation stuff for arc flag routing algorithm
         pub lat_range: Range<i64>,
         pub lon_range: Range<i64>,
     }
-
+    #[allow(dead_code)]
     impl ArcFlags {
         pub fn new(lat_min: f32, lat_max: f32, lon_min: f32, lon_max: f32) -> ArcFlags {
             ArcFlags {
@@ -626,7 +626,8 @@ mod arc_flags_algo {
         }
 
         pub fn arc_flags_precompute(self, dijkstra_graph: &mut Dijkstra) {
-            let mut boundary_node = Vec::new();
+            let mut boundary_node = HashSet::new();
+            let heuristics = HashMap::new();
             let region_nodes = dijkstra_graph
                 .graph
                 .nodes
@@ -640,16 +641,13 @@ mod arc_flags_algo {
             for node in region_nodes.clone() {
                 if let Some(edge_list) = dijkstra_graph.graph.edges.get_mut(&node) {
                     for edge in edge_list.iter_mut() {
-                        if region_nodes.contains(edge.0) {
-                            edge.1 .1 = true;
-                        } else {
-                            boundary_node.push(node);
+                        edge.1 .1 = true;
+                        if !region_nodes.contains(edge.0) {
+                            boundary_node.insert(node);
                         }
                     }
                 }
             }
-            boundary_node.dedup();
-            let heuristics = HashMap::new();
             for node in boundary_node {
                 dijkstra_graph.dijkstra(node, -1, &heuristics, false, true, true);
             }
@@ -664,9 +662,6 @@ mod tests {
     use crate::graph_construction::*;
     //use crate::landmark_algo::*;
     use crate::routing::*;
-
-    //use std::collections::HashMap;
-
     use std::collections::HashMap;
     use std::time::Instant;
     #[test]
@@ -698,27 +693,25 @@ mod tests {
         let mut shortest_path_costs = Vec::new();
         let mut query_time = Vec::new();
         let mut settled_nodes = Vec::new();
-        let mut heuristics;
+        let heuristics = HashMap::new();
         let now = Instant::now();
 
-        //let precompute = landmark_heuristic_precompute(&mut routing_graph, 42); //i think i did it the hard way with greedy the first time
+        //let precompute = landmark_heuristic_precompute(&mut routing_graph, 42);
         let arc_flag_thing = ArcFlags::new(49.20, 49.25, 6.95, 7.05);
         //let arc_flag_thing = ArcFlags::new(33.63, 33.64, -117.84, -117.83);
         arc_flag_thing.arc_flags_precompute(&mut routing_graph);
         let mut time = now.elapsed().as_millis() as f32 * 0.001;
-        println!("pre done {}", time);
+        println!("pre done {} \n", time);
+
         for _ in 0..100 {
             let source = routing_graph.get_random_node_id().unwrap();
             let target = routing_graph.get_random_node_area_id(49.20, 49.25, 6.95, 7.05);
             //let target = routing_graph.get_random_node_id().unwrap();
             //let target = routing_graph.get_random_node_area_id(33.63, 33.64, -117.84, -117.83);
-            heuristics = HashMap::new();
-            //heuristics = a_star_heuristic(&roads, target); //sets heurstic values for a*, comment out for base Dijkstra
-            //heuristics = landmark_heuristic(&roads, target, &landmark_list); //a* with landmarks on greedy pick
+            //heuristics = a_star_heuristic(&roads, target);
             //heuristics = landmark_heuristic(&precompute, &routing_graph, target);
             let now = Instant::now();
             let result = routing_graph.dijkstra(source, target, &heuristics, true, false, true);
-            //println!("result {:?}", result);
             time = now.elapsed().as_millis() as f32 * 0.001;
             query_time.push(time);
             shortest_path_costs.push(result.unwrap_or((vec![], 0)).1);
