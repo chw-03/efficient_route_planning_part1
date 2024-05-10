@@ -182,9 +182,7 @@ mod graph_construction {
                 }
             }
             let mut new_node_list = Vec::new();
-            new_node_list = number_times_node_visted
-                .iter()
-                .collect();
+            new_node_list = number_times_node_visted.iter().collect();
             new_node_list.sort_by(|(node1, counter1), (node2, counter2)| counter1.cmp(counter2));
 
             let connected_components = &mut new_node_list
@@ -219,8 +217,8 @@ mod routing {
     use std::cmp::Reverse;
     use std::collections::{BinaryHeap, HashMap, HashSet};
     use std::rc::Rc;
-    use std::u64::MAX;
     use std::time::Instant;
+    use std::u64::MAX;
 
     pub struct Dijkstra {
         //handle dijkstra calculations
@@ -291,21 +289,22 @@ mod routing {
         }
 
         pub fn set_arc_flags(&mut self, current: &PathedNode, neighbor: &PathedNode) {
-            self.graph
+            /* self.graph
+                           .edges
+                           .entry(current.node_self.id)
+                           .and_modify(|edge| {
+                               edge.entry(neighbor.node_self.id)
+                                   .and_modify(|(_, arcflag)| *arcflag = true);
+                           });
+            */
+            let (_, arcflag) = self
+                .graph
                 .edges
-                .entry(current.node_self.id)
-                .and_modify(|edge| {
-                    edge.entry(neighbor.node_self.id)
-                        .and_modify(|(_, arcflag)| *arcflag = true);
-                });
-
-            /*self.graph
-                .edges
-                .entry(neighbor.node_self.id)
-                .and_modify(|edge| {
-                    edge.entry(current.node_self.id)
-                        .and_modify(|(_, arcflag)| *arcflag = true);
-                });*/
+                .get_mut(&neighbor.node_self.id)
+                .unwrap()
+                .get_mut(&current.node_self.id)
+                .unwrap();
+            *arcflag = true;
         }
 
         pub fn get_neighbors(
@@ -386,7 +385,7 @@ mod routing {
             let mut counter = 1;
             while !priority_queue.is_empty() {
                 let pathed_current_node = priority_queue.pop().unwrap().0 .1; //.0 "unwraps" from Reverse()
-                
+
                 //something to check if node was already done stuff to and skip this whole thing if yes
                 if let Some(_) = (self.visited_nodes.insert(
                     pathed_current_node.node_self.id,
@@ -403,12 +402,13 @@ mod routing {
                     self.get_neighbors(&pathed_current_node, set_arc_flags, consider_arc_flags)
                 {
                     //set arc flag if its boundary node compute
-                    if set_arc_flags {
-                        self.set_arc_flags(&pathed_current_node, &neighbor_node.0);
-                    }
+
                     let temp_distance = pathed_current_node.distance_from_start + neighbor_node.1;
                     let next_distance = neighbor_node.0.distance_from_start;
                     if temp_distance < next_distance {
+                        if set_arc_flags {
+                            self.set_arc_flags(&pathed_current_node, &neighbor_node.0);
+                        }
                         let prev_node: Rc<PathedNode> = Rc::new(pathed_current_node.clone());
                         let tentative_new_node = PathedNode {
                             node_self: neighbor_node.0.node_self,
@@ -593,7 +593,9 @@ mod arc_flags_algo {
                         if !region_nodes.contains(edge.0) {
                             boundary_node.insert(node);
                         }
-                    }}}
+                    }
+                }
+            }
 
             for node in boundary_node {
                 dijkstra_graph.dijkstra(node, -1, &heuristics, false, true, true);
