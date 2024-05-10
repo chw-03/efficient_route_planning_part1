@@ -244,6 +244,18 @@ mod routing {
             let inner: PathedNode = Rc::unwrap_or_clone(last_elem);
             inner
         }
+        pub fn get_path(self) -> (Vec<Node>, u64) {
+            //uses reference to find the source node with parent_node == None
+            let mut shortest_path: Vec<Node> = Vec::new();
+            let mut total_distance: u64 = self.distance_from_start;
+            let mut current = self;
+            while let Some(previous_node) = current.parent_node {
+                shortest_path.push(current.node_self);
+                current = PathedNode::extract_parent(previous_node);
+            }
+            shortest_path.push(current.node_self);
+            (shortest_path, total_distance)
+        }
     }
 
     pub fn a_star_heuristic(graph: &RoadNetwork, target: i64) -> HashMap<i64, u64> {
@@ -328,19 +340,6 @@ mod routing {
             paths
         }
 
-        pub fn get_path(&mut self, target: PathedNode) -> (Vec<Node>, u64) {
-            //uses reference to find the source node with parent_node == None
-            let mut shortest_path: Vec<Node> = Vec::new();
-            let mut total_distance: u64 = target.distance_from_start;
-            let mut current = target;
-            while let Some(previous_node) = current.parent_node {
-                shortest_path.push(current.node_self);
-                current = PathedNode::extract_parent(previous_node);
-            }
-            shortest_path.push(current.node_self);
-            (shortest_path, total_distance)
-        }
-
         pub fn dijkstra(
             &mut self,
             source_id: i64,
@@ -349,7 +348,7 @@ mod routing {
             consider_arc_flags: bool,
             set_arc_flags: bool,
             reset_visted_list: bool,
-        ) -> Option<(Vec<Node>, u64)> {
+        ) -> Option<PathedNode> {
             //Heap(distance, node), Reverse turns binaryheap into minheap (default is maxheap)
             let mut priority_queue: BinaryHeap<Reverse<(u64, PathedNode)>> = BinaryHeap::new();
             //set target (-1) for all-node-settle rather than just target settle or smth
@@ -397,7 +396,7 @@ mod routing {
                 }
 
                 if pathed_current_node.node_self.id.eq(&target_id) {
-                    return Some(self.get_path(pathed_current_node));
+                    return Some(pathed_current_node);
                 }
 
                 for neighbor_node in
@@ -494,62 +493,6 @@ mod routing {
 mod landmark_algo {
     use crate::routing::*;
     use std::collections::HashMap;
-    /* //failed greedy node that i didnt need to make anyway
-
-    pub fn select_landmarks(dijkstra_graph: &mut Dijkstra, num_landmarks: usize) -> Vec<i64> {
-        let mut node_set: Vec<i64> = Vec::new();
-        node_set.push(dijkstra_graph.get_random_node_id().unwrap()); //push random first node to start
-        let mut distance = 0;
-        let mut max_dist_node = -1;
-        while node_set.len() < num_landmarks {
-            let target_set = dijkstra_graph.graph.nodes.clone();
-            let target_ids = target_set.keys();
-            for target_id in target_ids {
-                let temp = dijkstra_graph.set_dijkstra(&node_set, *target_id).unwrap();
-                if temp > distance {
-                    distance = temp;
-                    max_dist_node = *target_id
-                }
-            }
-            node_set.push(max_dist_node);
-        }
-        node_set
-    }
-
-    pub fn landmark_heuristic(graph: &RoadNetwork, target: i64, landmarks: &Vec<i64>) -> HashMap<i64, u64> {
-        let target = *graph.nodes.get(&target).unwrap();
-        let landmark_nodes = landmarks
-            .iter()
-            .map(|id| *graph.nodes.get(id).unwrap())
-            .collect::<Vec<Node>>();
-        //for each current i64 id, enter euciladan distance from current to target, divided by max speed on that path
-        let heuristics =
-            graph
-                .nodes
-                .iter()
-                .map(|(id, head)| {
-                    (
-                        *id,landmark_nodes.iter().map(|landmark|
-                        (((i128::pow(((head.lat - landmark.lat) * 111229).into(), 2) as f64
-                            / f64::powi(10.0, 14)
-                            + i128::pow(((head.lon - landmark.lon) * 71695).into(), 2) as f64
-                                / f64::powi(10.0, 14))
-                        .sqrt() as u64)
-                            / ((110 as f64) * 5.0 / 18.0) as u64) //110 is motorway speed --> max speed possible on road network
-                            .abs_diff(((i128::pow(((landmark.lat - target.lat) * 111229).into(), 2) as f64
-                        / f64::powi(10.0, 14)
-                        + i128::pow(((landmark.lon - target.lon) * 71695).into(), 2) as f64
-                            / f64::powi(10.0, 14))
-                    .sqrt() as u64)
-                        / ((110 as f64) * 5.0 / 18.0) as u64) //110 is motorway speed --> max speed possible on road network
-                    ).max().unwrap()
-                    )
-                })
-                .collect::<HashMap<i64, u64>>();
-        //println!("to {} is distance est {:?}", target, heuristics.clone().into_values());
-        heuristics
-    }
-    */
 
     pub fn landmark_heuristic_precompute(
         dijkstra_graph: &mut Dijkstra,
@@ -637,6 +580,12 @@ mod arc_flags_algo {
                 })
                 .map(|(id, _)| *id)
                 .collect::<Vec<i64>>();
+            /*for (node, edges) in dijkstra_graph.graph.edges.iter_mut() {
+                if region_nodes.contains(node) {
+                    boundary_node.insert(*node);
+                    let _ = edges.iter_mut().map(|(_, (_, flag))| *flag = true);
+                }
+            }*/
             for node in region_nodes.clone() {
                 if let Some(edge_list) = dijkstra_graph.graph.edges.get_mut(&node) {
                     for edge in edge_list.iter_mut() {
@@ -644,9 +593,8 @@ mod arc_flags_algo {
                         if !region_nodes.contains(edge.0) {
                             boundary_node.insert(node);
                         }
-                    }
-                }
-            }
+                    }}}
+
             for node in boundary_node {
                 dijkstra_graph.dijkstra(node, -1, &heuristics, false, true, true);
             }
@@ -713,7 +661,8 @@ mod tests {
             let result = routing_graph.dijkstra(source, target, &heuristics, true, false, true);
             time = now.elapsed().as_millis() as f32 * 0.001;
             query_time.push(time);
-            shortest_path_costs.push(result.unwrap_or((vec![], 0)).1);
+
+            shortest_path_costs.push(result.unwrap().get_path().1);
             settled_nodes.push(routing_graph.visited_nodes.len() as u64);
         }
 
