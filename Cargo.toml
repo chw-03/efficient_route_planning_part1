@@ -8,7 +8,3 @@ edition = "2021"
 [dependencies]
 osmpbfreader = "0.16.1"
 rand = "0.8.5"
-
-[[bin]]
-name = "basic-algos"
-path = "src/basic-algos.rs"
