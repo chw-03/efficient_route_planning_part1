@@ -304,19 +304,16 @@ mod routing {
                 if self.visited_nodes.contains_key(&path.0) {
                     continue;
                 }
-                if (consider_arc_flags && !path.1 .1) { 
+                if (consider_arc_flags && !path.1 .1) {
                     continue;
                 }
-                //let node_self: Node = 
-                paths.push((
-                    *self.graph.nodes.get(&path.0).unwrap(),
-                    path.1 .0
-                ));
+                //let node_self: Node =
+                paths.push((*self.graph.nodes.get(&path.0).unwrap(), path.1 .0));
             }
             paths
         }
 
-         pub fn dijkstra(
+        pub fn dijkstra(
             &mut self,
             source_id: i64,
             target_id: i64,
@@ -326,7 +323,7 @@ mod routing {
             //Heap(distance, node), Reverse turns binaryheap into minheap (default is maxheap)
             let mut priority_queue: BinaryHeap<Reverse<(u64, PathedNode)>> = BinaryHeap::new();
             let mut previous_nodes = HashMap::new();
-            
+
             //set target (-1) for all-node-settle rather than just target settle or smth
             self.visited_nodes.clear();
 
@@ -366,11 +363,8 @@ mod routing {
                 let cost = pathed_current_node.distance_from_start;
                 let idx = pathed_current_node.node_self.id;
                 //something to check if node was already done stuff to and skip this whole thing if yes
-                self.visited_nodes.insert(
-                    idx,
-                    cost
-                );
-                
+                self.visited_nodes.insert(idx, cost);
+
                 if cost > *gscore.get(&idx).unwrap_or(&MAX) {
                     continue;
                 }
@@ -391,14 +385,10 @@ mod routing {
                             parent_node: Some(prev_node),
                         };
                         priority_queue.push(Reverse((
-                            temp_distance
-                                + *heuristics.get(&neighbor.0.id).unwrap_or(&0),
+                            temp_distance + *heuristics.get(&neighbor.0.id).unwrap_or(&0),
                             tentative_new_node,
                         )));
-                        previous_nodes.insert(
-                            neighbor.0.id,
-                            pathed_current_node.node_self.id,
-                        );
+                        previous_nodes.insert(neighbor.0.id, pathed_current_node.node_self.id);
                     }
                 }
                 counter += 1;
@@ -586,15 +576,15 @@ mod arc_flags_algo {
                                 break;
                             }
                         }
-                    }/*
-                    if let Some(edgelist) = dijkstra_graph.graph.edges.get_mut(&tail) {
-                        for (&id, (_, arcflag)) in edgelist {
-                            if id == head {
-                                *arcflag = true;
-                                break;
-                            }
-                        }
-                    }*/
+                    } /*
+                      if let Some(edgelist) = dijkstra_graph.graph.edges.get_mut(&tail) {
+                          for (&id, (_, arcflag)) in edgelist {
+                              if id == head {
+                                  *arcflag = true;
+                                  break;
+                              }
+                          }
+                      }*/
                 }
             }
         }
@@ -610,13 +600,12 @@ mod tests {
     use crate::routing::*;
     use std::collections::HashMap;
     use std::time::Instant;
-    
-    
+
     #[test]
     fn run_algo() {
-        //let path = "bw.pbf";
+        let path = "bw.pbf";
         //let path = "uci.pbf";
-        let path = "saarland.pbf";
+        //let path = "saarland.pbf";
         let data = RoadNetwork::read_from_osm_file(path).unwrap();
         let mut roads = RoadNetwork::new(data.0, data.1);
         println!(
@@ -625,9 +614,12 @@ mod tests {
             roads.nodes.len(),
             roads.edges.len()
         );
+        let now = Instant::now();
         roads = roads.reduce_to_largest_connected_component();
+        let mut time = now.elapsed().as_millis() as f32 * 0.001;
         println!(
-            "reduced map nodes {}, and edges {}",
+            "time: {}, reduced map nodes: {}, edges: {}",
+            time,
             roads.nodes.len(),
             roads
                 .edges
@@ -642,22 +634,23 @@ mod tests {
         let mut query_time = Vec::new();
         let mut settled_nodes = Vec::new();
         let heuristics = HashMap::new();
-        let now = Instant::now();
 
         //let precompute = landmark_heuristic_precompute(&mut routing_graph, 42);
-        let arc_flag_thing = ArcFlags::new(49.20, 49.25, 6.95, 7.05);
-        //let arc_flag_thing = ArcFlags::new(33.63, 33.64, -117.84, -117.83);
+        //let arc_flag_thing = ArcFlags::new(49.20, 49.25, 6.95, 7.05); //saar
+        let arc_flag_thing = ArcFlags::new(47.95, 48.05, 7.75, 7.90); //ba-wu
+                                                                      //let arc_flag_thing = ArcFlags::new(33.63, 33.64, -117.84, -117.83); //uci
         arc_flag_thing.arc_flags_precompute(&mut routing_graph);
-        let mut time = now.elapsed().as_millis() as f32 * 0.001;
+        time = now.elapsed().as_millis() as f32 * 0.001;
         println!("pre done {} \n", time);
 
         for _ in 0..100 {
             let source = routing_graph.get_random_node_id().unwrap();
-            let target = routing_graph.get_random_node_area_id(49.20, 49.25, 6.95, 7.05);
             //let target = routing_graph.get_random_node_id().unwrap();
-            //let target = routing_graph.get_random_node_area_id(33.63, 33.64, -117.84, -117.83);
-            //heuristics = a_star_heuristic(&roads, target);
-            //heuristics = landmark_heuristic(&precompute, &routing_graph, target);
+            //let target = routing_graph.get_random_node_area_id(49.20, 49.25, 6.95, 7.05); //saar
+            let target = routing_graph.get_random_node_area_id(47.95, 48.05, 7.75, 7.90); //ba-wu
+                                                                                          //let target = routing_graph.get_random_node_area_id(33.63, 33.64, -117.84, -117.83); //uci
+                                                                                          //heuristics = a_star_heuristic(&roads, target);
+                                                                                          //heuristics = landmark_heuristic(&precompute, &routing_graph, target);
             let now = Instant::now();
             let result = routing_graph.dijkstra(source, target, &heuristics, true);
             time = now.elapsed().as_millis() as f32 * 0.001;
@@ -684,7 +677,6 @@ mod tests {
             settled_nodes.iter().sum::<u64>() / settled_nodes.len() as u64
         );
     }
-    
 
     /*
     #[test]
@@ -744,5 +736,4 @@ mod tests {
             graph.dijkstra(source, target, &heuristics, true)
         );
     }*/
-    
 }
