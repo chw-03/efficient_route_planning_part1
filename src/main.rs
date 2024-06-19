@@ -628,7 +628,7 @@ mod contraction_hierarchies {
         }
 
         pub fn contract_node(&self, nth_order: usize, graph: &mut Dijkstra) {
-            let nth_node = self.ordered_nodes[nth_order];
+            let nth_node = self.ordered_nodes[nth_order + 1];
             let edgelist = graph.graph.edges.get_mut(&nth_node).unwrap();
             for edge in edgelist.iter_mut() {
                 edge.1 .1 = false;
@@ -639,7 +639,7 @@ mod contraction_hierarchies {
             //(#shortcuts, #shortcuts - arcs removed)
             let mut num_shortcuts: u8 = 0;
             let mut edge_diff: i8 = 0;
-            let v = self.ordered_nodes[nth_order];
+            let v = self.ordered_nodes[nth_order + 1];
             let mut costs_of_uv = Vec::new();
             let mut costs_of_vw = Vec::new();
             for (u, u_edgelist) in graph.graph.edges.iter() {
@@ -694,9 +694,9 @@ mod tests {
 
     #[test]
     fn run_algo() {
-        //let path = "bw.pbf";
+        let path = "bw.pbf";
         //let path = "uci.pbf";
-        let path = "saarland.pbf";
+        //let path = "saarland.pbf";
         let data = RoadNetwork::read_from_osm_file(path).unwrap();
         let mut roads = RoadNetwork::new(data.0, data.1);
         println!(
