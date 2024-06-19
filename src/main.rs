@@ -608,10 +608,10 @@ mod contraction_hierarchies {
     }
 
     impl ContractedGraph {
-        pub fn new() -> ContractedGraph{
+        pub fn new() -> ContractedGraph {
             ContractedGraph {
                 ordered_nodes: Vec::new(),
-            }            
+            }
         }
 
         pub fn compute_random_node_ordering(&mut self, graph: &mut Dijkstra, length: usize) {
@@ -635,41 +635,47 @@ mod contraction_hierarchies {
             }
         }
 
-        pub fn generate_shortcuts(&self, graph: &mut Dijkstra) {
+        pub fn generate_shortcuts(&self, nth_order: usize, graph: &mut Dijkstra) -> (u8, i8) {
+            //(#shortcuts, #shortcuts - arcs removed)
+            let mut num_shortcuts: u8 = 0;
+            let mut edge_diff: i8 = 0;
+            let v = self.ordered_nodes[nth_order];
             let mut costs_of_uv = Vec::new();
             let mut costs_of_vw = Vec::new();
             for (u, u_edgelist) in graph.graph.edges.iter() {
-                if self.ordered_nodes.contains(u) {
-                    let v = u; //this is just to show that this means the current node is some removed-node V
+                if *u == v {
+                    //the current node is the removed-node V
                     for (w, (cost_vw, _)) in u_edgelist {
-                        costs_of_vw.push((*v, *w, *cost_vw));
+                        costs_of_vw.push((*w, *cost_vw));
+                        edge_diff -= 1;
                     }
                 } else {
-                    for (v, (cost_uv, _)) in u_edgelist {
-                        if self.ordered_nodes.contains(v) {
-                            costs_of_uv.push((*u, *v, *cost_uv));
+                    for (tail, (cost_uv, _)) in u_edgelist {
+                        if *tail == v {
+                            costs_of_uv.push((*u, *cost_uv));
                         }
                     }
                 }
             }
-            for (u_i, v, cost_uv) in costs_of_uv.iter() {
+            for (u, cost_uv) in costs_of_uv.iter() {
                 let mut edges_uw = HashMap::new();
-                let mut costs_uw = costs_of_vw
+                let mut costs_uw: Vec<(i64, u64)> = costs_of_vw
                     .iter()
-                    .filter(|(v_j, _, _)| v_j == v)
-                    .map(|(_, w_j, cost_vw)| (*u_i, *w_j, *cost_uv + *cost_vw))
-                    .collect::<Vec<(i64, i64, u64)>>();
-                costs_uw.sort_by(|(_, _, a), (_, _, b)| b.cmp(a));
-                graph.set_cost_upper_bound(costs_uw[0].2);
-                graph.dijkstra(*u_i, -1, &None, true);
-                for (_, w, cost_uw) in costs_uw {
-                    let dist_w = graph.graph.edges.get(u_i).unwrap().get(&w).unwrap().0;
+                    .map(|(w, cost_vw)| (*w, *cost_uv + *cost_vw))
+                    .collect();
+                costs_uw.sort_by(|(_, a), (_, b)| b.cmp(a));
+                graph.set_cost_upper_bound(costs_uw[0].1);
+                graph.dijkstra(*u, -1, &None, true);
+                for (w, cost_uw) in costs_uw {
+                    let dist_w = graph.graph.edges.get(u).unwrap().get(&w).unwrap().0;
                     if dist_w > cost_uw {
                         edges_uw.insert(w, (dist_w, true));
+                        num_shortcuts += 1;
                     }
                 }
-                graph.graph.edges.insert(*u_i, edges_uw);
+                graph.graph.edges.insert(*u, edges_uw);
             }
+            (num_shortcuts, edge_diff + num_shortcuts as i8)
         }
     }
 }
@@ -683,8 +689,8 @@ mod tests {
     //use crate::landmark_algo::*;
     use crate::routing::*;
     //use std::collections::HashMap;
-    use std::time::Instant;
     use crate::contraction_hierarchies::*;
+    use std::time::Instant;
 
     #[test]
     fn run_algo() {
@@ -714,16 +720,41 @@ mod tests {
                 / 2
         );
 
+        let mut contraction_time = Vec::new();
+        let mut shortcut_hg = vec![0, 0, 0, 0, 0];
+        let mut edge_diff_hg = vec![0, 0, 0, 0, 0];
         let mut routing_graph = Dijkstra::new(&roads);
         let mut ch_algo = ContractedGraph::new();
         ch_algo.compute_random_node_ordering(&mut routing_graph, 1000);
         for n in 0..ch_algo.ordered_nodes.len() {
             ch_algo.contract_node(n, &mut routing_graph);
-            ch_algo.generate_shortcuts(&mut routing_graph);  
+            let (mut num_shortcut, num_edge_diff) =
+                ch_algo.generate_shortcuts(n, &mut routing_graph);
+            time = now.elapsed().as_millis() as f32 * 0.001;
+            contraction_time.push(time);
+            if num_shortcut > 4 {
+                num_shortcut = 4;
+            }
+            shortcut_hg[num_shortcut as usize] += 1;
+
+            if num_edge_diff <= -3 {
+                edge_diff_hg[0] += 1;
+            } else if num_edge_diff == -2 {
+                edge_diff_hg[1] += 1;
+            } else if num_edge_diff == 2 {
+                edge_diff_hg[3] += 1;
+            } else if num_edge_diff >= 3 {
+                edge_diff_hg[4] += 1;
+            } else {
+                edge_diff_hg[2] += 1;
+            }
         }
-        time = now.elapsed().as_millis() as f32 * 0.001;
-        println!("pre done {} \n", time);
-        
+
+        println!(
+            "average contraction time in seconds {}",
+            contraction_time.iter().sum::<f32>() / contraction_time.len() as f32
+        );
+
         /*
         let mut shortest_path_costs = Vec::new();
         let mut query_time = Vec::new();
@@ -738,7 +769,7 @@ mod tests {
         time = now.elapsed().as_millis() as f32 * 0.001;
         println!("pre done {} \n", time);
 
-        
+
         for _ in 0..100 {
             let source = routing_graph.get_random_node_id().unwrap();
             //let target = routing_graph.get_random_node_id().unwrap();
