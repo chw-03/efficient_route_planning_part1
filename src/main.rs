@@ -412,7 +412,7 @@ mod routing {
                 counter += 1;
             }
             if consider_arc_flags {
-                print!(" f{} ", counter);
+                //print!(" f{} ", counter);
             }
             (None, previous_nodes)
         }
@@ -616,7 +616,7 @@ mod contraction_hierarchies {
 
         pub fn compute_random_node_ordering(&mut self, graph: &mut Dijkstra, length: usize) {
             self.ordered_nodes.push(0);
-            while self.ordered_nodes.len() > length + 1 {
+            while self.ordered_nodes.len() < length + 1 {
                 self.ordered_nodes
                     .push(graph.get_random_node_id().unwrap_or_default());
             }
@@ -629,9 +629,23 @@ mod contraction_hierarchies {
 
         pub fn contract_node(&self, nth_order: usize, graph: &mut Dijkstra) {
             let nth_node = self.ordered_nodes[nth_order + 1];
-            let edgelist = graph.graph.edges.get_mut(&nth_node).unwrap();
+            /*let edgelist = graph.graph.edges.get_mut(&nth_node).unwrap();
             for edge in edgelist.iter_mut() {
                 edge.1 .1 = false;
+            } */
+            for (u, u_edgelist) in graph.graph.edges.iter_mut() {
+                if *u == nth_node {
+                    //the current node is the removed-node V
+                    for edge in u_edgelist {
+                        edge.1 .1 = false;
+                    }
+                } else {
+                    for (tail, (cost_uv, flag)) in u_edgelist {
+                        if *tail == nth_node {
+                            *flag = false;
+                        }
+                    }
+                }
             }
         }
 
@@ -653,6 +667,7 @@ mod contraction_hierarchies {
                     for (tail, (cost_uv, _)) in u_edgelist {
                         if *tail == v {
                             costs_of_uv.push((*u, *cost_uv));
+                            edge_diff -=1;
                         }
                     }
                 }
@@ -667,10 +682,11 @@ mod contraction_hierarchies {
                 graph.set_cost_upper_bound(costs_uw[0].1);
                 graph.dijkstra(*u, -1, &None, true);
                 for (w, cost_uw) in costs_uw {
-                    let dist_w = graph.graph.edges.get(u).unwrap().get(&w).unwrap().0;
-                    if dist_w > cost_uw {
-                        edges_uw.insert(w, (dist_w, true));
-                        num_shortcuts += 1;
+                    if let Some((dist_w, _)) = graph.graph.edges.get(u).unwrap().get(&w) {
+                        if *dist_w > cost_uw {
+                            edges_uw.insert(w, (*dist_w, true));
+                            num_shortcuts += 1;
+                        }
                     }
                 }
                 graph.graph.edges.insert(*u, edges_uw);
@@ -726,16 +742,23 @@ mod tests {
         let mut routing_graph = Dijkstra::new(&roads);
         let mut ch_algo = ContractedGraph::new();
         ch_algo.compute_random_node_ordering(&mut routing_graph, 1000);
-        for n in 0..ch_algo.ordered_nodes.len() {
+        for n in 0..ch_algo.ordered_nodes.len()-1 {
             ch_algo.contract_node(n, &mut routing_graph);
-            let (mut num_shortcut, num_edge_diff) =
+            let (num_shortcut, num_edge_diff) =
                 ch_algo.generate_shortcuts(n, &mut routing_graph);
             time = now.elapsed().as_millis() as f32 * 0.001;
             contraction_time.push(time);
-            if num_shortcut > 4 {
-                num_shortcut = 4;
+            if num_shortcut >= 4 {
+                shortcut_hg[4] += 1;
+            } else if num_shortcut == 3 {
+                shortcut_hg[3] += 1;
+            } else if num_shortcut == 2 {
+                shortcut_hg[2] += 1;
+            } else if num_shortcut == 1 {
+                shortcut_hg[1] += 1;
+            } else if num_shortcut == 0{
+                shortcut_hg[0] += 1;
             }
-            shortcut_hg[num_shortcut as usize] += 1;
 
             if num_edge_diff <= -3 {
                 edge_diff_hg[0] += 1;
@@ -753,6 +776,16 @@ mod tests {
         println!(
             "average contraction time in seconds {}",
             contraction_time.iter().sum::<f32>() / contraction_time.len() as f32
+        );
+
+        println!(
+            "shortcut histogram {:?}",
+            shortcut_hg
+        );
+
+        println!(
+            "edge difference histogram {:?}",
+            edge_diff_hg
         );
 
         /*
