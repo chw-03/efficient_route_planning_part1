@@ -636,11 +636,11 @@ mod contraction_hierarchies {
             for (u, u_edgelist) in graph.graph.edges.iter_mut() {
                 if *u == nth_node {
                     //the current node is the removed-node V
-                    for edge in u_edgelist {
-                        edge.1 .1 = false;
+                    for (_, (_, flag)) in u_edgelist {
+                        *flag = false;
                     }
                 } else {
-                    for (tail, (cost_uv, flag)) in u_edgelist {
+                    for (tail, (_, flag)) in u_edgelist {
                         if *tail == nth_node {
                             *flag = false;
                         }
@@ -672,26 +672,54 @@ mod contraction_hierarchies {
                     }
                 }
             }
+            
             for (u, cost_uv) in costs_of_uv.iter() {
                 let mut edges_uw = HashMap::new();
-                let mut costs_uw: Vec<(i64, u64)> = costs_of_vw
-                    .iter()
-                    .map(|(w, cost_vw)| (*w, *cost_uv + *cost_vw))
-                    .collect();
-                costs_uw.sort_by(|(_, a), (_, b)| b.cmp(a));
-                graph.set_cost_upper_bound(costs_uw[0].1);
-                graph.dijkstra(*u, -1, &None, true);
-                for (w, cost_uw) in costs_uw {
-                    if let Some((dist_w, _)) = graph.graph.edges.get(u).unwrap().get(&w) {
-                        if *dist_w > cost_uw {
-                            edges_uw.insert(w, (*dist_w, true));
-                            num_shortcuts += 1;
+                if costs_of_vw.len() == 0 {
+                    for (w, _) in costs_of_vw.iter() {
+                        if let Some(dist_w) = graph.visited_nodes.get(&w) {
+                            //print!(" {} ", dist_w);
+                            if *dist_w > *cost_uv {
+                                edges_uw.insert(*w, (*dist_w, true));
+                                num_shortcuts += 1;
+                            }
+                        }
+                        if let Some(dist_w) = graph.visited_nodes.get(u) {
+                            //print!(" {} ", dist_w);
+                            if *dist_w > *cost_uv {
+                                edges_uw.insert(*w, (*dist_w, true));
+                                num_shortcuts += 1;
+                            }
+                        }
+                    }
+                } else {
+                    let mut costs_uw: Vec<(i64, u64)> = costs_of_vw
+                        .iter()
+                        .map(|(w, cost_vw)| (*w, *cost_uv + *cost_vw))
+                        .collect();
+                    costs_uw.sort_by(|(_, a), (_, b)| b.cmp(a));
+                    graph.set_cost_upper_bound(costs_uw[0].1);
+                    graph.dijkstra(*u, -1, &None, true);
+                    for (w, cost_uw) in costs_uw {
+                        if let Some(dist_w) = graph.visited_nodes.get(&w) {
+                            //print!(" {} ", dist_w);
+                            if *dist_w > cost_uw {
+                                edges_uw.insert(w, (*dist_w, true));
+                                num_shortcuts += 1;
+                            }
+                        }
+                        if let Some(dist_w) = graph.visited_nodes.get(u) {
+                            //print!(" {} ", dist_w);
+                            if *dist_w > cost_uw {
+                                edges_uw.insert(w, (*dist_w, true));
+                                num_shortcuts += 1;
+                            }
                         }
                     }
                 }
                 graph.graph.edges.insert(*u, edges_uw);
             }
-            (num_shortcuts, edge_diff + num_shortcuts as i8)
+            (num_shortcuts, (edge_diff + num_shortcuts as i8)/2)
         }
     }
 }
@@ -710,9 +738,9 @@ mod tests {
 
     #[test]
     fn run_algo() {
-        let path = "bw.pbf";
+        //let path = "bw.pbf";
         //let path = "uci.pbf";
-        //let path = "saarland.pbf";
+        let path = "saarland.pbf";
         let data = RoadNetwork::read_from_osm_file(path).unwrap();
         let mut roads = RoadNetwork::new(data.0, data.1);
         println!(
@@ -741,7 +769,7 @@ mod tests {
         let mut edge_diff_hg = vec![0, 0, 0, 0, 0];
         let mut routing_graph = Dijkstra::new(&roads);
         let mut ch_algo = ContractedGraph::new();
-        ch_algo.compute_random_node_ordering(&mut routing_graph, 1000);
+        ch_algo.compute_random_node_ordering(&mut routing_graph, 1000); //here
         for n in 0..ch_algo.ordered_nodes.len()-1 {
             ch_algo.contract_node(n, &mut routing_graph);
             let (num_shortcut, num_edge_diff) =
