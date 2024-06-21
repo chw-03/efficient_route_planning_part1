@@ -606,8 +606,8 @@ mod contraction_hierarchies {
 
     pub struct ContractedGraph {
         pub ordered_nodes_to_contract: Vec<i64>,
-        costs_of_uv: HashMap<i64, u64>, //incoming arcs to v
-        costs_of_vw: HashMap<i64, u64> //outgoing arcs from v
+        pub costs_of_uv: HashMap<i64, u64>, //incoming arcs to v
+        pub costs_of_vw: HashMap<i64, u64> //outgoing arcs from v
 
     }
 
@@ -641,7 +641,7 @@ mod contraction_hierarchies {
             } */
             for (u, u_edgelist) in graph.graph.edges.iter_mut() {
                 if *u == nth_node {
-                    //the current node is the removed-node V
+                    //the current node is the to-be-removed node v
                     for (w, (cost, flag)) in u_edgelist {
                         self.costs_of_vw.insert(*w, *cost);
                         *flag = false;
@@ -649,7 +649,7 @@ mod contraction_hierarchies {
                 } else {
                     for (v, (cost, flag)) in u_edgelist {
                         if *v == nth_node {
-                            self.costs_of_uv.insert(*v, *cost);
+                            self.costs_of_uv.insert(*u, *cost);
                             *flag = false;
                         }
                     }
@@ -657,14 +657,29 @@ mod contraction_hierarchies {
             }
         }
 
-        pub fn generate_shortcuts(&self, nth_order: usize, graph: &mut Dijkstra) -> (u8, i8) {
+        pub fn generate_shortcuts(&mut self, _: usize, graph: &mut Dijkstra) -> (u8, i8) {
             //(#shortcuts, #shortcuts - arcs removed)
             let mut num_shortcuts: u8 = 0;
             let mut edge_diff: i8 = 0;
-            let v = self.ordered_nodes_to_contract[nth_order + 1];
-            
-            
-            
+            //let v = self.ordered_nodes_to_contract[nth_order + 1];
+            let max_u_cost = self.costs_of_uv.clone().into_values().max().unwrap_or_default();
+            let max_w_cost = self.costs_of_vw.clone().into_values().max().unwrap_or_default();
+            graph.set_cost_upper_bound(max_u_cost + max_w_cost);
+            for (u, cost_uv) in self.costs_of_uv.iter() {
+                graph.dijkstra(*u, -1, &None, true);
+                for (w, cost_vw) in self.costs_of_vw.iter() {
+                    let path_via_uvw = cost_uv+cost_vw;
+                    if let Some(&dist_w) = graph.visited_nodes.get(w) {
+                        if dist_w > path_via_uvw {
+                            num_shortcuts += 1;
+                            //TODO actually add a shortcut
+                        }
+                    }
+                    edge_diff -= 1;
+                }
+            }
+            self.costs_of_uv = HashMap::new();
+            self.costs_of_vw = HashMap::new();
             (num_shortcuts, (edge_diff + num_shortcuts as i8)/2)
         }
     }
