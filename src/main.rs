@@ -600,12 +600,12 @@ mod arc_flags_algo {
 
 #[allow(dead_code)]
 mod contraction_hierarchies {
-    use std::collections::HashMap;
-
+    use std::collections::{HashMap, HashSet};
+    use core::u64::MAX;
     use crate::routing::*;
 
     pub struct ContractedGraph {
-        pub ordered_nodes_to_contract: Vec<i64>,
+        pub ordered_nodes_to_contract: HashSet<i64>,
         pub costs_of_uv: HashMap<i64, u64>, //incoming arcs to v
         pub costs_of_vw: HashMap<i64, u64> //outgoing arcs from v
 
@@ -614,17 +614,17 @@ mod contraction_hierarchies {
     impl ContractedGraph {
         pub fn new() -> ContractedGraph {
             ContractedGraph {
-                ordered_nodes_to_contract: Vec::new(),
+                ordered_nodes_to_contract: HashSet::new(),
                 costs_of_uv: HashMap::new(), 
                 costs_of_vw: HashMap::new()
             }
         }
 
         pub fn compute_random_node_ordering(&mut self, graph: &mut Dijkstra, length: usize) {
-            self.ordered_nodes_to_contract.push(0);
-            while self.ordered_nodes_to_contract.len() < length + 1 {
+            self.ordered_nodes_to_contract.insert(0);
+            while self.ordered_nodes_to_contract.len() < graph.graph.nodes.len().max(length + 1) {
                 self.ordered_nodes_to_contract
-                    .push(graph.get_random_node_id().unwrap_or_default());
+                    .insert(graph.get_random_node_id().unwrap_or_default());
             }
             for (_, edgelist) in graph.graph.edges.iter_mut() {
                 for edge in edgelist.iter_mut() {
@@ -633,23 +633,21 @@ mod contraction_hierarchies {
             }
         }
 
-        pub fn contract_node(&mut self, nth_order: usize, graph: &mut Dijkstra) {
-            let nth_node = self.ordered_nodes_to_contract[nth_order + 1];
-            /*let edgelist = graph.graph.edges.get_mut(&nth_node).unwrap();
-            for edge in edgelist.iter_mut() {
-                edge.1 .1 = false;
-            } */
+        pub fn contract_node(&mut self, nth_node: i64, graph: &mut Dijkstra) {
+            println!("v: {}", nth_node);
             for (u, u_edgelist) in graph.graph.edges.iter_mut() {
                 if *u == nth_node {
                     //the current node is the to-be-removed node v
                     for (w, (cost, flag)) in u_edgelist {
                         self.costs_of_vw.insert(*w, *cost);
+                        print!(" w{} ", w);
                         *flag = false;
                     }
                 } else {
                     for (v, (cost, flag)) in u_edgelist {
                         if *v == nth_node {
                             self.costs_of_uv.insert(*u, *cost);
+                            print!(" u{} ", u);
                             *flag = false;
                         }
                     }
@@ -657,7 +655,7 @@ mod contraction_hierarchies {
             }
         }
 
-        pub fn generate_shortcuts(&mut self, _: usize, graph: &mut Dijkstra) -> (u8, i8) {
+        pub fn generate_shortcuts(&mut self, v: i64, graph: &mut Dijkstra) -> (u8, i8) {
             //(#shortcuts, #shortcuts - arcs removed)
             let mut num_shortcuts: u8 = 0;
             let mut edge_diff: i8 = 0;
@@ -665,15 +663,18 @@ mod contraction_hierarchies {
             let max_u_cost = self.costs_of_uv.clone().into_values().max().unwrap_or_default();
             let max_w_cost = self.costs_of_vw.clone().into_values().max().unwrap_or_default();
             graph.set_cost_upper_bound(max_u_cost + max_w_cost);
+            println!("\nlim: {}", max_u_cost+max_w_cost);
             for (u, cost_uv) in self.costs_of_uv.iter() {
                 graph.dijkstra(*u, -1, &None, true);
                 for (w, cost_vw) in self.costs_of_vw.iter() {
+                    if w == u {continue;}
+                    print!(" u-w:{}-{} ", u, w);
                     let path_via_uvw = cost_uv+cost_vw;
-                    if let Some(&dist_w) = graph.visited_nodes.get(w) {
-                        if dist_w > path_via_uvw {
-                            num_shortcuts += 1;
-                            //TODO actually add a shortcut
-                        }
+                    let &dist_w = graph.visited_nodes.get(w).unwrap_or(&MAX);
+                    print!(" uw/uvw:{}/{} ", dist_w, path_via_uvw);
+                    if dist_w > path_via_uvw {
+                        num_shortcuts += 1;
+                        //TODO actually add a shortcut
                     }
                     edge_diff -= 1;
                 }
@@ -693,10 +694,10 @@ mod tests {
     use crate::graph_construction::*;
     //use crate::landmark_algo::*;
     use crate::routing::*;
-    //use std::collections::HashMap;
+    use std::collections::HashMap;
     use crate::contraction_hierarchies::*;
     use std::time::Instant;
-
+/*
     #[test]
     fn run_algo() {
         //let path = "bw.pbf";
@@ -731,11 +732,12 @@ mod tests {
         let mut routing_graph = Dijkstra::new(&roads);
         let mut ch_algo = ContractedGraph::new();
         ch_algo.compute_random_node_ordering(&mut routing_graph, 1000); //here
-        for n in 0..ch_algo.ordered_nodes_to_contract.len()-1 {
+        for node in ch_algo.ordered_nodes_to_contract {
             ch_algo.contract_node(n, &mut routing_graph);
+            time = now.elapsed().as_millis() as f32 * 0.001;
             let (num_shortcut, num_edge_diff) =
                 ch_algo.generate_shortcuts(n, &mut routing_graph);
-            time = now.elapsed().as_millis() as f32 * 0.001;
+            //time here?
             contraction_time.push(time);
             if num_shortcut >= 4 {
                 shortcut_hg[4] += 1;
@@ -826,8 +828,9 @@ mod tests {
             settled_nodes.iter().sum::<u64>() / settled_nodes.len() as u64
         );*/
     }
+*/
 
-    /*
+/*  
     #[test]
     fn test() {
         let node0 = Node {
@@ -861,7 +864,7 @@ mod tests {
             lon: 72500000,
         };
         let roads = RoadNetwork {
-            nodes: HashMap::from([ (0, node0), (1, node1), (2, node2), (3, node3), (4, node4),  (5, node5)]),
+            nodes: HashMap::from([ (0, node0), (1, node1), (2, node2), (3, node3), (4, node4), (5, node5)]),
             edges: HashMap::from([
                 (0, HashMap::from([(1, (5, false))])),
                 (1, HashMap::from([(0, (5, false)), (2, (5, false))])),
@@ -873,7 +876,6 @@ mod tests {
             raw_ways: vec![Way{id:0,speed:0, refs:vec![0,0]}]
         };
         println!("Nodes: {}, Edges: {}", roads.nodes.len(), roads.edges.len());
-        let heuristics = HashMap::new();
         let mut graph = Dijkstra::new(&roads);
         let arc_flag_thing = ArcFlags::new(49.0, 49.2, 6.5, 6.52);
         arc_flag_thing.arc_flags_precompute(&mut graph);
@@ -882,7 +884,99 @@ mod tests {
         let target = 0;
         println!(
             "\ndijiktra path and cost {:?}",
-            graph.dijkstra(source, target, &heuristics, true)
+            graph.dijkstra(source, target, &None, true)
         );
-    }*/
+    }
+*/
+    #[test]
+    fn ch_test() {
+        let node0 = Node {
+            id: 0,
+            lat: 490000000,
+            lon: 65000000,
+        };
+        let node1 = Node {
+            id: 1,
+            lat: 491000000,
+            lon: 65100000,
+        };
+        let node2 = Node {
+            id: 2,
+            lat: 495000000,
+            lon: 70000000,
+        };
+        let node3 = Node {
+            id: 3,
+            lat: 493500000,
+            lon: 71250000,
+        };
+        let node4 = Node {
+            id: 4,
+            lat: 492500000,
+            lon: 72500000,
+        };
+        let node5 = Node {
+            id: 5,
+            lat: 497500000,
+            lon: 72500000,
+        };
+        let roads = RoadNetwork {
+            nodes: HashMap::from([ (0, node0), (1, node1), (2, node2), (3, node3), (4, node4), (5, node5)]),
+            edges: HashMap::from([
+                (0, HashMap::from([(1, (5, false))])),
+                (1, HashMap::from([(0, (5, false)), (2, (5, false))])),
+                (2, HashMap::from([(1, (5, false)), (3, (5, false)), (4, (5, false))])),
+                (3, HashMap::from([(2, (5, false)), (4, (5, false))])),
+                (4, HashMap::from([(3, (5, false)), (5, (5, false)), (2, (5, false))])),
+                (5, HashMap::from([(4, (5, false))])),
+            ]),
+            raw_ways: vec![Way{id:0,speed:0, refs:vec![0,0]}]
+        };
+        println!("Nodes: {}, Edges: {}", roads.nodes.len(), roads.edges.len());
+        
+        let mut shortcut_hg = vec![0, 0, 0, 0, 0];
+        let mut edge_diff_hg = vec![0, 0, 0, 0, 0];
+        let mut routing_graph = Dijkstra::new(&roads);
+        let mut ch_algo = ContractedGraph::new();
+        ch_algo.compute_random_node_ordering(&mut routing_graph, 10); //here
+        for &n in ch_algo.ordered_nodes_to_contract.clone().iter() {
+            ch_algo.contract_node(n, &mut routing_graph);
+            let (num_shortcut, num_edge_diff) =
+                ch_algo.generate_shortcuts(n, &mut routing_graph);
+
+            if num_shortcut >= 4 {
+                shortcut_hg[4] += 1;
+            } else if num_shortcut == 3 {
+                shortcut_hg[3] += 1;
+            } else if num_shortcut == 2 {
+                shortcut_hg[2] += 1;
+            } else if num_shortcut == 1 {
+                shortcut_hg[1] += 1;
+            } else if num_shortcut == 0{
+                shortcut_hg[0] += 1;
+            }
+
+            if num_edge_diff <= -3 {
+                edge_diff_hg[0] += 1;
+            } else if num_edge_diff == -2 {
+                edge_diff_hg[1] += 1;
+            } else if num_edge_diff == 2 {
+                edge_diff_hg[3] += 1;
+            } else if num_edge_diff >= 3 {
+                edge_diff_hg[4] += 1;
+            } else {
+                edge_diff_hg[2] += 1;
+            }
+        }
+
+        println!(
+            "shortcut histogram {:?}",
+            shortcut_hg
+        );
+
+        println!(
+            "edge difference histogram {:?}",
+            edge_diff_hg
+        );
+    }
 }
