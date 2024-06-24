@@ -28,6 +28,7 @@ mod graph_construction {
         pub nodes: HashMap<i64, Node>, // <node.id, node>
         pub edges: HashMap<i64, HashMap<i64, (u64, bool)>>, // tail.id, <head.id, (cost, arcflag)>
         pub raw_ways: Vec<Way>,
+        pub raw_nodes: Vec<i64>
     }
 
     fn speed_calc(highway: &str) -> Option<u64> {
@@ -116,9 +117,10 @@ mod graph_construction {
             }
 
             Self {
-                nodes,
                 raw_ways: ways,
                 edges,
+                raw_nodes: nodes.clone().iter().map(|(&id, _)| id).collect(),
+                nodes
             }
         }
 
@@ -420,14 +422,11 @@ mod routing {
         pub fn get_random_node_id(&mut self) -> Option<i64> {
             //returns ID of a random valid node from a graph
             let mut rng = rand::thread_rng();
-            let mut full_node_list = Vec::new();
-            for node in &self.graph.nodes {
-                full_node_list.push(node.0);
-            }
+            let mut full_node_list = &self.graph.raw_nodes;
             let mut random: usize = rng.gen_range(0..full_node_list.len());
             let mut node_id = full_node_list.get(random).unwrap();
 
-            Some(**node_id)
+            Some(*node_id)
         }
 
         pub fn get_random_node_area_id(
@@ -475,6 +474,14 @@ mod routing {
                 }
             }
             None
+        }
+    
+        pub fn reset_flags(&mut self) {
+            for (_, edgelist) in self.graph.edges.iter_mut() {
+                for edge in edgelist.iter_mut() {
+                    edge.1 .1 = true;
+                }
+            }
         }
     }
 }
@@ -605,83 +612,71 @@ mod contraction_hierarchies {
     use crate::routing::*;
 
     pub struct ContractedGraph {
-        pub ordered_nodes_to_contract: HashSet<i64>,
-        pub costs_of_uv: HashMap<i64, u64>, //incoming arcs to v
-        pub costs_of_vw: HashMap<i64, u64> //outgoing arcs from v
-
+        pub ordered_nodes_to_contract: HashSet<i64>
     }
 
     impl ContractedGraph {
         pub fn new() -> ContractedGraph {
             ContractedGraph {
-                ordered_nodes_to_contract: HashSet::new(),
-                costs_of_uv: HashMap::new(), 
-                costs_of_vw: HashMap::new()
+                ordered_nodes_to_contract: HashSet::new()
             }
         }
 
         pub fn compute_random_node_ordering(&mut self, graph: &mut Dijkstra, length: usize) {
-            self.ordered_nodes_to_contract.insert(0);
-            while self.ordered_nodes_to_contract.len() < graph.graph.nodes.len().max(length + 1) {
+            //self.ordered_nodes_to_contract.insert(0);
+            while self.ordered_nodes_to_contract.len() < length {//graph.graph.nodes.len().min(length + 1) {
                 self.ordered_nodes_to_contract
                     .insert(graph.get_random_node_id().unwrap_or_default());
             }
-            for (_, edgelist) in graph.graph.edges.iter_mut() {
-                for edge in edgelist.iter_mut() {
-                    edge.1 .1 = true;
-                }
-            }
+            graph.reset_flags();
         }
 
-        pub fn contract_node(&mut self, nth_node: i64, graph: &mut Dijkstra) {
-            println!("v: {}", nth_node);
-            for (u, u_edgelist) in graph.graph.edges.iter_mut() {
-                if *u == nth_node {
-                    //the current node is the to-be-removed node v
-                    for (w, (cost, flag)) in u_edgelist {
-                        self.costs_of_vw.insert(*w, *cost);
-                        print!(" w{} ", w);
-                        *flag = false;
-                    }
-                } else {
-                    for (v, (cost, flag)) in u_edgelist {
-                        if *v == nth_node {
-                            self.costs_of_uv.insert(*u, *cost);
-                            print!(" u{} ", u);
-                            *flag = false;
-                        }
-                    }
-                }
-            }
-        }
-
-        pub fn generate_shortcuts(&mut self, v: i64, graph: &mut Dijkstra) -> (u8, i8) {
+        pub fn contract_node(&mut self, nth_node: i64, graph: &mut Dijkstra) -> (u8, i8) {
+            //println!("\nv: {}", nth_node);
             //(#shortcuts, #shortcuts - arcs removed)
             let mut num_shortcuts: u8 = 0;
             let mut edge_diff: i8 = 0;
-            //let v = self.ordered_nodes_to_contract[nth_order + 1];
-            let max_u_cost = self.costs_of_uv.clone().into_values().max().unwrap_or_default();
-            let max_w_cost = self.costs_of_vw.clone().into_values().max().unwrap_or_default();
-            graph.set_cost_upper_bound(max_u_cost + max_w_cost);
-            println!("\nlim: {}", max_u_cost+max_w_cost);
-            for (u, cost_uv) in self.costs_of_uv.iter() {
-                graph.dijkstra(*u, -1, &None, true);
-                for (w, cost_vw) in self.costs_of_vw.iter() {
-                    if w == u {continue;}
-                    print!(" u-w:{}-{} ", u, w);
-                    let path_via_uvw = cost_uv+cost_vw;
-                    let &dist_w = graph.visited_nodes.get(w).unwrap_or(&MAX);
-                    print!(" uw/uvw:{}/{} ", dist_w, path_via_uvw);
-                    if dist_w > path_via_uvw {
-                        num_shortcuts += 1;
-                        //TODO actually add a shortcut
-                    }
+            let mut costs_of_uv = HashMap::new();
+            let mut costs_of_vw = HashMap::new();
+            if let Some(edgelist) = graph.graph.edges.get_mut(&nth_node) {  //if Some
+                for (w, (cost, flag)) in edgelist {
+                    costs_of_vw.insert(*w, *cost);
+                    *flag = false;
                     edge_diff -= 1;
                 }
             }
-            self.costs_of_uv = HashMap::new();
-            self.costs_of_vw = HashMap::new();
-            (num_shortcuts, (edge_diff + num_shortcuts as i8)/2)
+            for (&w, &cost) in costs_of_vw.iter() {
+                graph.graph.edges.get_mut(&w).unwrap().get_mut(&nth_node).unwrap().1 = false;
+                costs_of_uv.insert(w, cost);
+            }
+            /*for (u, edgelist) in graph.graph.edges.iter_mut() { //for arcs, undirected
+                for (v, (cost, flag)) in edgelist.iter_mut() {
+                    if *v == nth_node {
+                        *flag = false;
+                        costs_of_uv.insert(*u, *cost);
+                    }
+                }
+            }*/
+            graph.set_max_settled_nodes(20);
+            graph.set_cost_upper_bound(2 * costs_of_vw.clone().into_values().max().unwrap_or_default());
+            for (u, cost_uv) in costs_of_uv.iter() {
+                graph.dijkstra(*u, -1, &None, true);
+                for (w, cost_vw) in costs_of_vw.iter() {
+                    if w == u {continue;}
+                    //print!(" u-w:{}-{} ", u, w);
+                    let path_via_uvw = cost_uv+cost_vw;
+                    let &dist_w = graph.visited_nodes.get(w).unwrap_or(&MAX);
+                    if dist_w > path_via_uvw {
+                        //print!(" {}/{} ", dist_w, path_via_uvw);
+                        num_shortcuts += 1;
+                        edge_diff += 1;
+                        //TODO actually add a shortcut
+                    }
+                }
+            }
+            //graph.reset_flags();
+
+            (num_shortcuts, edge_diff)
         }
     }
 }
@@ -697,7 +692,7 @@ mod tests {
     use std::collections::HashMap;
     use crate::contraction_hierarchies::*;
     use std::time::Instant;
-/*
+
     #[test]
     fn run_algo() {
         //let path = "bw.pbf";
@@ -732,11 +727,10 @@ mod tests {
         let mut routing_graph = Dijkstra::new(&roads);
         let mut ch_algo = ContractedGraph::new();
         ch_algo.compute_random_node_ordering(&mut routing_graph, 1000); //here
-        for node in ch_algo.ordered_nodes_to_contract {
-            ch_algo.contract_node(n, &mut routing_graph);
-            time = now.elapsed().as_millis() as f32 * 0.001;
-            let (num_shortcut, num_edge_diff) =
-                ch_algo.generate_shortcuts(n, &mut routing_graph);
+        for &n in ch_algo.ordered_nodes_to_contract.clone().iter() {
+            let now = Instant::now();
+            let (num_shortcut, num_edge_diff) = ch_algo.contract_node(n, &mut routing_graph);
+            time = now.elapsed().as_micros() as f32;
             //time here?
             contraction_time.push(time);
             if num_shortcut >= 4 {
@@ -765,7 +759,7 @@ mod tests {
         }
 
         println!(
-            "average contraction time in seconds {}",
+            "average contraction time in micros {}",
             contraction_time.iter().sum::<f32>() / contraction_time.len() as f32
         );
 
@@ -778,7 +772,6 @@ mod tests {
             "edge difference histogram {:?}",
             edge_diff_hg
         );
-
         /*
         let mut shortest_path_costs = Vec::new();
         let mut query_time = Vec::new();
@@ -828,7 +821,7 @@ mod tests {
             settled_nodes.iter().sum::<u64>() / settled_nodes.len() as u64
         );*/
     }
-*/
+
 
 /*  
     #[test]
@@ -888,6 +881,8 @@ mod tests {
         );
     }
 */
+
+/*
     #[test]
     fn ch_test() {
         let node0 = Node {
@@ -940,10 +935,8 @@ mod tests {
         let mut ch_algo = ContractedGraph::new();
         ch_algo.compute_random_node_ordering(&mut routing_graph, 10); //here
         for &n in ch_algo.ordered_nodes_to_contract.clone().iter() {
-            ch_algo.contract_node(n, &mut routing_graph);
             let (num_shortcut, num_edge_diff) =
-                ch_algo.generate_shortcuts(n, &mut routing_graph);
-
+                ch_algo.contract_node(n, &mut routing_graph);
             if num_shortcut >= 4 {
                 shortcut_hg[4] += 1;
             } else if num_shortcut == 3 {
@@ -979,4 +972,5 @@ mod tests {
             edge_diff_hg
         );
     }
+*/
 }
