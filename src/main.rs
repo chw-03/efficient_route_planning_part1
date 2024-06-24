@@ -624,7 +624,7 @@ mod contraction_hierarchies {
 
         pub fn compute_random_node_ordering(&mut self, graph: &mut Dijkstra, length: usize) {
             //self.ordered_nodes_to_contract.insert(0);
-            while self.ordered_nodes_to_contract.len() < length {//graph.graph.nodes.len().min(length + 1) {
+            while self.ordered_nodes_to_contract.len() < length {
                 self.ordered_nodes_to_contract
                     .insert(graph.get_random_node_id().unwrap_or_default());
             }
@@ -632,7 +632,6 @@ mod contraction_hierarchies {
         }
 
         pub fn contract_node(&mut self, nth_node: i64, graph: &mut Dijkstra) -> (u8, i8) {
-            //println!("\nv: {}", nth_node);
             //(#shortcuts, #shortcuts - arcs removed)
             let mut num_shortcuts: u8 = 0;
             let mut edge_diff: i8 = 0;
@@ -663,18 +662,17 @@ mod contraction_hierarchies {
                 graph.dijkstra(*u, -1, &None, true);
                 for (w, cost_vw) in costs_of_vw.iter() {
                     if w == u {continue;}
-                    //print!(" u-w:{}-{} ", u, w);
                     let path_via_uvw = cost_uv+cost_vw;
                     let &dist_w = graph.visited_nodes.get(w).unwrap_or(&MAX);
                     if dist_w > path_via_uvw {
-                        //print!(" {}/{} ", dist_w, path_via_uvw);
                         num_shortcuts += 1;
                         edge_diff += 1;
                         //TODO actually add a shortcut
+                        graph.graph.edges.get_mut(u).unwrap().insert(*w, (path_via_uvw, true));
+                        graph.graph.edges.get_mut(w).unwrap().insert(*u, (path_via_uvw, true));                        
                     }
                 }
             }
-            //graph.reset_flags();
 
             (num_shortcuts, edge_diff)
         }
@@ -689,15 +687,14 @@ mod tests {
     use crate::graph_construction::*;
     //use crate::landmark_algo::*;
     use crate::routing::*;
-    use std::collections::HashMap;
     use crate::contraction_hierarchies::*;
     use std::time::Instant;
 
     #[test]
     fn run_algo() {
-        //let path = "bw.pbf";
+        let path = "bw.pbf";
         //let path = "uci.pbf";
-        let path = "saarland.pbf";
+        //let path = "saarland.pbf";
         let data = RoadNetwork::read_from_osm_file(path).unwrap();
         let mut roads = RoadNetwork::new(data.0, data.1);
         println!(
@@ -733,28 +730,37 @@ mod tests {
             time = now.elapsed().as_micros() as f32;
             //time here?
             contraction_time.push(time);
-            if num_shortcut >= 4 {
-                shortcut_hg[4] += 1;
-            } else if num_shortcut == 3 {
-                shortcut_hg[3] += 1;
-            } else if num_shortcut == 2 {
-                shortcut_hg[2] += 1;
-            } else if num_shortcut == 1 {
-                shortcut_hg[1] += 1;
-            } else if num_shortcut == 0{
+            
+            if num_shortcut == 0 {
                 shortcut_hg[0] += 1;
+            }
+            else if num_shortcut == 1 {
+                shortcut_hg[1] += 1;
+            }
+            else if num_shortcut == 2 {
+                shortcut_hg[2] += 1;
+            }
+            else if num_shortcut == 3 {
+                shortcut_hg[3] += 1;
+            }
+            else if num_shortcut >= 4 {
+                shortcut_hg[4] += 1;
             }
 
             if num_edge_diff <= -3 {
                 edge_diff_hg[0] += 1;
-            } else if num_edge_diff == -2 {
+            }
+            else if num_edge_diff == -2 {
                 edge_diff_hg[1] += 1;
-            } else if num_edge_diff == 2 {
-                edge_diff_hg[3] += 1;
-            } else if num_edge_diff >= 3 {
-                edge_diff_hg[4] += 1;
-            } else {
+            }
+            else if num_edge_diff >= -1 && num_edge_diff <= 1{
                 edge_diff_hg[2] += 1;
+            }
+            else if num_edge_diff == 2 {
+                edge_diff_hg[3] += 1;
+            }
+            else if num_edge_diff >= 3 {
+                edge_diff_hg[4] += 1;
             }
         }
 
