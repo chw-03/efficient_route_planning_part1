@@ -484,10 +484,6 @@ mod routing {
                 }
             }
         }
-
-        pub fn bidirectional_compute(&mut self, source_id: i64, target_id: i64) {
-            let dist_source_to_u = self.dijkstra(source_id, target_id, &None, true).1
-        }
     }
 }
 
@@ -616,7 +612,7 @@ mod contraction_hierarchies {
     use core::u64::MAX;
     use std::{
         cmp::Reverse,
-        collections::{BinaryHeap, HashMap},
+        collections::{BinaryHeap, HashMap}, i8::MAX as i8_max,
     };
 
     pub struct ContractedGraph {
@@ -684,9 +680,9 @@ mod contraction_hierarchies {
                 }
             }*/
 
-            graph.set_max_settled_nodes(20);
             graph.set_cost_upper_bound(
-                2 * costs_of_vw.clone().into_values().max().unwrap_or_default(),
+                costs_of_uv.clone().into_values().max().unwrap_or_default() +
+                costs_of_vw.clone().into_values().max().unwrap_or_default(),
             );
             for (u, cost_uv) in costs_of_uv.iter() {
                 graph.dijkstra(*u, -1, &None, true);
@@ -721,48 +717,64 @@ mod contraction_hierarchies {
             (num_shortcuts, edge_diff)
         }
 
-        pub fn ch_precompute(&mut self, graph: &mut Dijkstra) {
+        pub fn ch_precompute(&mut self, graph: &mut Dijkstra) -> u64 {
+            let mut total_shortcuts = 0;
             //step 1: calculate initial e_d order --> PQ with (k: e_d, v: node)
             let mut priority_queue: BinaryHeap<Reverse<(i8, i64)>> = BinaryHeap::new();
             for &n in graph.graph.raw_nodes.clone().iter() {
                 let (_, e_d) = self.contract_node(n, graph, true);
                 priority_queue.push(Reverse((e_d, n)));
             }
-            //step 2: contract all nodes in order of ed + recalculate heuristic --> Lazy + Neighbors
-            /*Lazy update heuristic: update EDs "on demand" as follows: Before contracting node with currently smallest ED,
-            recompute its ED and see if it is still the smallest. If not pick next smallest one, recompute its ED and see if
-            that is the smallest now; if not, continue in same way.
-            Neighbours only heuristic: after each contraction, recompute EDs, but only for the neighbours of the contracted node */
+            graph.set_max_settled_nodes(20);
+            //step 2: contract all nodes in order of ed, recalculate heuristic --> Lazy + Neighbors
+            //Lazy update: If current node does not have smallest ED, pick next, recompute its ED, repeat until find smallest
+            //Neighbours only: after each contraction, recompute EDs, but only for the neighbours of the contracted node
             let mut index = 0;
             while !priority_queue.is_empty() {
-                let nodeset = priority_queue.pop().unwrap().0;
-                if self.ordered_nodes.contains_key(&nodeset.1) {
-                    priority_queue.pop(); //might not need this line?
+                let (_, node_id) = priority_queue.pop().unwrap().0;
+                /*let (next_ed, _) = priority_queue.peek().unwrap_or(&Reverse((i8_max, 0))).0;
+                let (_, e_d) = self.contract_node(node_id, graph, true);
+                if e_d > next_ed //&& priority_queue.len() % 1000 == 0{
+                    //priority_queue.push(Reverse((e_d, node_id)));
                     continue;
+                }*/
+                total_shortcuts += self.contract_node(node_id, graph, false).0 as u64;
+                for (neighbor, _ ) in graph.graph.edges.get(&node_id).unwrap().clone() {
+                    self.contract_node(neighbor, graph, true);
                 }
-                //println!("a");
-                let (_, e_d) = self.contract_node(nodeset.1, graph, true);
-                priority_queue.push(Reverse((e_d, nodeset.1)));
-                let nextnode = priority_queue.peek().unwrap_or(&Reverse((0, 0))).0;
-                if nodeset.1 > nextnode.1 {
-                    continue;
-                } //check if current is still the smallest --> if not, pick next node
-                priority_queue.pop();
-                self.contract_node(nodeset.1, graph, false);
-                self.ordered_nodes.insert(nodeset.1, index);
+                self.ordered_nodes.insert(node_id, index);
                 index += 1;
-                //println!("c {} and {}", index, priority_queue.len());
+                println!("{}", priority_queue.len());
             }
+            println!("");
             //step 3: reset arc flags, only arc(u, v) with u.index < v.index == true
             //index can be fount iwth binary_search(u).unwrap
             graph.reset_all_flags();
             for (u, edgelist) in graph.graph.edges.iter_mut() {
                 for (v, (_, flag)) in edgelist {
                     if self.ordered_nodes.get(u) > self.ordered_nodes.get(v) {
+                        //print!("a");
                         *flag = true;
                     }
                 }
             }
+            graph.set_max_settled_nodes(MAX);
+            graph.set_cost_upper_bound(MAX);
+            total_shortcuts
+        }
+
+        pub fn bidirectional_compute(graph: &mut Dijkstra, source_id: i64, target_id: i64) ->(u64, i64) {
+            graph.dijkstra(source_id, target_id, &None, true);
+            let dist_source_to_u = graph.visited_nodes.clone();
+            graph.dijkstra(target_id, source_id, &None, true);
+            let dist_target_to_u = &graph.visited_nodes;
+            let mut distances_s_t = Vec::new();
+            for (u, dist_s) in dist_source_to_u {
+                if let Some(dist_t) = dist_target_to_u.get(&u) {
+                    distances_s_t.push((dist_t + dist_s, u));
+                }
+            }
+            *distances_s_t.iter().min().unwrap()
         }
     }
 }
@@ -810,11 +822,39 @@ mod tests {
         let mut routing_graph = Dijkstra::new(&roads);
         let mut ch_algo = ContractedGraph::new();
         let now = Instant::now();
-        ch_algo.ch_precompute(&mut routing_graph);
+        let total_shortcuts = ch_algo.ch_precompute(&mut routing_graph);
         time = now.elapsed().as_millis() as f32 * 0.001;
         println!("precomp seconds: {}", time);
+        println!("total shortcuts: {}", total_shortcuts);
 
-        /*ch_algo.compute_random_node_ordering(&mut routing_graph, 1000); //here
+        let mut shortest_path_costs = Vec::new();
+        let mut query_time = Vec::new();
+
+
+        for _ in 0..10 {
+            //1000
+            let source = routing_graph.get_random_node_id().unwrap();
+            let target = routing_graph.get_random_node_id().unwrap();
+            let now = Instant::now();
+            let result = ContractedGraph::bidirectional_compute(&mut routing_graph, source, target);
+            time = now.elapsed().as_millis() as f32 * 0.001;
+            query_time.push(time);
+            shortest_path_costs.push(result.0);
+        }
+
+        println!(
+            "average cost mm:ss {}:{}",
+            shortest_path_costs.iter().sum::<u64>() / shortest_path_costs.len() as u64 / 60,
+            shortest_path_costs.iter().sum::<u64>() / shortest_path_costs.len() as u64 % 60
+        );
+        println!(
+            "average query time in seconds {}",
+            query_time.iter().sum::<f32>() / query_time.len() as f32
+        );
+
+        /*
+        routing_graph.set_max_settled_nodes(20);
+        ch_algo.compute_random_node_ordering(&mut routing_graph, 1000); //here
         let mut contraction_time = Vec::new();
         let mut shortcut_hg = vec![0, 0, 0, 0, 0];
         let mut edge_diff_hg = vec![0, 0, 0, 0, 0];
@@ -857,8 +897,8 @@ mod tests {
 
         println!("shortcut histogram {:?}", shortcut_hg);
 
-        println!("edge difference histogram {:?}", edge_diff_hg);
-        */
+        println!("edge difference histogram {:?}", edge_diff_hg);*/
+        
     }
 
     /*
@@ -973,57 +1013,4 @@ mod tests {
         }
     */
 
-    /*
-    #[test]
-    fn ch_test() {
-        let node0 = Node {
-            id: 0,
-            lat: 490000000,
-            lon: 65000000,
-        };
-        let node1 = Node {
-            id: 1,
-            lat: 491000000,
-            lon: 65100000,
-        };
-        let node2 = Node {
-            id: 2,
-            lat: 495000000,
-            lon: 70000000,
-        };
-        let node3 = Node {
-            id: 3,
-            lat: 493500000,
-            lon: 71250000,
-        };
-        let node4 = Node {
-            id: 4,
-            lat: 492500000,
-            lon: 72500000,
-        };
-        let node5 = Node {
-            id: 5,
-            lat: 497500000,
-            lon: 72500000,
-        };
-        let roads = RoadNetwork {
-            nodes: HashMap::from([ (0, node0), (1, node1), (2, node2), (3, node3), (4, node4), (5, node5)]),
-            edges: HashMap::from([
-                (0, HashMap::from([(1, (5, false))])),
-                (1, HashMap::from([(0, (5, false)), (2, (5, false))])),
-                (2, HashMap::from([(1, (5, false)), (3, (5, false)), (4, (5, false))])),
-                (3, HashMap::from([(2, (5, false)), (4, (5, false))])),
-                (4, HashMap::from([(3, (5, false)), (5, (5, false)), (2, (5, false))])),
-                (5, HashMap::from([(4, (5, false))])),
-            ]),
-            raw_ways: vec![Way{id:0,speed:0, refs:vec![0,0]}],
-            raw_nodes: vec![node0.id, node1.id, node2.id, node3.id, node4.id, node5.id]
-        };
-        println!("Nodes: {}, Edges: {}", roads.nodes.len(), roads.edges.len());
-
-        let mut graph = Dijkstra::new(&roads);
-        let mut ch_algo = ContractedGraph::new();
-        ch_algo.ch_precompute(&mut graph);
-    }
-    */
 }
