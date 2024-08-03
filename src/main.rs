@@ -477,10 +477,10 @@ mod routing {
             None
         }
 
-        pub fn reset_all_flags(&mut self) {
+        pub fn reset_all_flags(&mut self, state: bool) {
             for (_, edgelist) in self.graph.edges.iter_mut() {
                 for edge in edgelist.iter_mut() {
-                    edge.1 .1 = true;
+                    edge.1 .1 = state;
                 }
             }
         }
@@ -612,11 +612,11 @@ mod contraction_hierarchies {
     use core::u64::MAX;
     use std::{
         cmp::Reverse,
-        collections::{BinaryHeap, HashMap}, i8::MAX as i8_max,
+        collections::{BinaryHeap, HashMap},
     };
 
     pub struct ContractedGraph {
-        pub ordered_nodes: HashMap<i64, u32>,
+        pub ordered_nodes: HashMap<i64, u32>, //id, order number
     }
 
     impl ContractedGraph {
@@ -632,16 +632,16 @@ mod contraction_hierarchies {
                 self.ordered_nodes
                     .insert(graph.get_random_node_id().unwrap_or_default(), 0);
             }
-            graph.reset_all_flags();
+            graph.reset_all_flags(true);
         }
 
         pub fn contract_node(
             &mut self,
             node_id: i64,
             graph: &mut Dijkstra,
-            compute_edge_distance_only: bool,
+            compute_edge_diff_only: bool,
         ) -> (u8, i8) {
-            //(#shortcuts, #shortcuts - arcs removed)
+            //(#shortcuts, edge difference = #shortcuts - arcs incident to node)
             let mut num_shortcuts: u8 = 0;
             let mut edge_diff: i8 = 0;
             let mut costs_of_uv = HashMap::new();
@@ -649,31 +649,29 @@ mod contraction_hierarchies {
             if let Some(edgelist) = graph.graph.edges.get_mut(&node_id) {
                 //if Some
                 for (w, (cost, flag)) in edgelist {
-                    costs_of_vw.insert(*w, *cost);
-                    if !compute_edge_distance_only {
-                        //if false (default)
+                    if *flag {
+                        costs_of_vw.insert(*w, *cost);
                         *flag = false;
+                        edge_diff -= 1;
                     }
-                    edge_diff -= 1;
                 }
             }
+
             for (&w, &cost) in costs_of_vw.iter() {
-                if !compute_edge_distance_only {
-                    //if false (default)
-                    graph
-                        .graph
-                        .edges
-                        .get_mut(&w)
-                        .unwrap()
-                        .get_mut(&node_id)
-                        .unwrap()
-                        .1 = false;
-                }
+                graph
+                    .graph
+                    .edges
+                    .get_mut(&w)
+                    .unwrap()
+                    .get_mut(&node_id)
+                    .unwrap()
+                    .1 = false;
                 costs_of_uv.insert(w, cost);
             }
+
             /*for (u, edgelist) in graph.graph.edges.iter_mut() { //for arcs, undirected
                 for (v, (cost, flag)) in edgelist.iter_mut() {
-                    if *v == nth_node {
+                    if *v == node_id {
                         *flag = false;
                         costs_of_uv.insert(*u, *cost);
                     }
@@ -681,21 +679,23 @@ mod contraction_hierarchies {
             }*/
 
             graph.set_cost_upper_bound(
-                costs_of_uv.clone().into_values().max().unwrap_or_default() +
-                costs_of_vw.clone().into_values().max().unwrap_or_default(),
+                costs_of_uv.clone().into_values().max().unwrap_or_default()
+                    + costs_of_vw.clone().into_values().max().unwrap_or_default(),
             );
             for (u, cost_uv) in costs_of_uv.iter() {
+                if self.ordered_nodes.contains_key(u) {
+                    continue;
+                }
                 graph.dijkstra(*u, -1, &None, true);
                 for (w, cost_vw) in costs_of_vw.iter() {
-                    if w == u {
+                    if w == u || self.ordered_nodes.contains_key(w) {
                         continue;
                     }
                     let path_via_uvw = cost_uv + cost_vw;
                     let &dist_w = graph.visited_nodes.get(w).unwrap_or(&MAX);
                     if dist_w > path_via_uvw {
-                        num_shortcuts += 1;
                         edge_diff += 1;
-                        if !compute_edge_distance_only {
+                        num_shortcuts += 1;
                             //if false (default)
                             graph
                                 .graph
@@ -709,51 +709,88 @@ mod contraction_hierarchies {
                                 .get_mut(w)
                                 .unwrap()
                                 .insert(*u, (path_via_uvw, true));
-                        }
+                    }
+                }
+            }
+            if compute_edge_diff_only {
+                for (&w, &_) in costs_of_vw.iter() {
+                    //if false (default)
+                    graph
+                        .graph
+                        .edges
+                        .get_mut(&w)
+                        .unwrap()
+                        .get_mut(&node_id)
+                        .unwrap()
+                        .1 = true;
+                    graph
+                        .graph
+                        .edges
+                        .get_mut(&node_id)
+                        .unwrap()
+                        .get_mut(&w)
+                        .unwrap()
+                        .1 = true;
+                    for (&u, &_) in costs_of_uv.iter() {
+                        graph
+                                .graph
+                                .edges
+                                .get_mut(&u)
+                                .unwrap()
+                                .remove_entry(&w);
+                            graph
+                                .graph
+                                .edges
+                                .get_mut(&w)
+                                .unwrap()
+                                .remove_entry(&u);
                     }
                 }
             }
 
             (num_shortcuts, edge_diff)
-        }
+        }   
 
         pub fn ch_precompute(&mut self, graph: &mut Dijkstra) -> u64 {
             let mut total_shortcuts = 0;
+            graph.set_max_settled_nodes(20);
             //step 1: calculate initial e_d order --> PQ with (k: e_d, v: node)
             let mut priority_queue: BinaryHeap<Reverse<(i8, i64)>> = BinaryHeap::new();
             for &n in graph.graph.raw_nodes.clone().iter() {
                 let (_, e_d) = self.contract_node(n, graph, true);
+                //let e_d = self.edge_diff_calc_test(n, graph);
                 priority_queue.push(Reverse((e_d, n)));
             }
-            graph.set_max_settled_nodes(20);
-            //step 2: contract all nodes in order of ed, recalculate heuristic --> Lazy + Neighbors
+
+            //println!("pq: {:?}", priority_queue);
+
+            //step 2: contract all nodes in order of ed, recalculate heuristic --> Lazy 
             //Lazy update: If current node does not have smallest ED, pick next, recompute its ED, repeat until find smallest
-            //Neighbours only: after each contraction, recompute EDs, but only for the neighbours of the contracted node
             let mut index = 0;
             while !priority_queue.is_empty() {
                 let (_, node_id) = priority_queue.pop().unwrap().0;
-                /*let (next_ed, _) = priority_queue.peek().unwrap_or(&Reverse((i8_max, 0))).0;
                 let (_, e_d) = self.contract_node(node_id, graph, true);
-                if e_d > next_ed //&& priority_queue.len() % 1000 == 0{
-                    //priority_queue.push(Reverse((e_d, node_id)));
-                    continue;
-                }*/
-                total_shortcuts += self.contract_node(node_id, graph, false).0 as u64;
-                for (neighbor, _ ) in graph.graph.edges.get(&node_id).unwrap().clone() {
-                    self.contract_node(neighbor, graph, true);
+                //let e_d = self.edge_diff_calc_test(node_id, graph);
+                
+                if !priority_queue.is_empty() {
+                    let (next_ed, _) = priority_queue.peek().unwrap().0;
+                    if e_d > next_ed {
+                        priority_queue.push(Reverse((e_d, node_id)));
+                        continue;
+                    }
                 }
+                
+                //establish contraction order
                 self.ordered_nodes.insert(node_id, index);
+                total_shortcuts += self.contract_node(node_id, graph, false).0 as u64;
                 index += 1;
-                println!("{}", priority_queue.len());
+                println!("id: {}    ed:{}    pq:{}    sc:{}", node_id, e_d, priority_queue.len(), total_shortcuts);
             }
-            println!("");
-            //step 3: reset arc flags, only arc(u, v) with u.index < v.index == true
-            //index can be fount iwth binary_search(u).unwrap
-            graph.reset_all_flags();
-            for (u, edgelist) in graph.graph.edges.iter_mut() {
-                for (v, (_, flag)) in edgelist {
-                    if self.ordered_nodes.get(u) > self.ordered_nodes.get(v) {
-                        //print!("a");
+            //step 3: reset arc flags, only flags of arc(u, v) with u.index < v.index == true
+            graph.reset_all_flags(false);
+            for (v, edgelist) in graph.graph.edges.iter_mut() {
+                for (u, (_, flag)) in edgelist {
+                    if self.ordered_nodes.get(u) < self.ordered_nodes.get(v) {
                         *flag = true;
                     }
                 }
@@ -784,13 +821,14 @@ fn main() {}
 #[cfg(test)]
 mod tests {
     //use crate::arc_flags_algo::ArcFlags;
-    use crate::graph_construction::*;
+    use crate::graph_construction::{*,RoadNetwork};
     //use crate::landmark_algo::*;
     use crate::contraction_hierarchies::*;
     use crate::routing::*;
-    //use std::collections::HashMap;
+    use std::collections::HashMap;
     use std::time::Instant;
 
+    /*
     #[test]
     fn contraction_hierarchies_test() {
         //let path = "bw.pbf";
@@ -822,38 +860,11 @@ mod tests {
         let mut routing_graph = Dijkstra::new(&roads);
         let mut ch_algo = ContractedGraph::new();
         let now = Instant::now();
-        let total_shortcuts = ch_algo.ch_precompute(&mut routing_graph);
-        time = now.elapsed().as_millis() as f32 * 0.001;
-        println!("precomp seconds: {}", time);
-        println!("total shortcuts: {}", total_shortcuts);
 
-        let mut shortest_path_costs = Vec::new();
-        let mut query_time = Vec::new();
-
-
-        for _ in 0..10 {
-            //1000
-            let source = routing_graph.get_random_node_id().unwrap();
-            let target = routing_graph.get_random_node_id().unwrap();
-            let now = Instant::now();
-            let result = ContractedGraph::bidirectional_compute(&mut routing_graph, source, target);
-            time = now.elapsed().as_millis() as f32 * 0.001;
-            query_time.push(time);
-            shortest_path_costs.push(result.0);
-        }
-
-        println!(
-            "average cost mm:ss {}:{}",
-            shortest_path_costs.iter().sum::<u64>() / shortest_path_costs.len() as u64 / 60,
-            shortest_path_costs.iter().sum::<u64>() / shortest_path_costs.len() as u64 % 60
-        );
-        println!(
-            "average query time in seconds {}",
-            query_time.iter().sum::<f32>() / query_time.len() as f32
-        );
-
-        /*
+        routing_graph.reset_all_flags(true);
         routing_graph.set_max_settled_nodes(20);
+
+        
         ch_algo.compute_random_node_ordering(&mut routing_graph, 1000); //here
         let mut contraction_time = Vec::new();
         let mut shortcut_hg = vec![0, 0, 0, 0, 0];
@@ -897,10 +908,43 @@ mod tests {
 
         println!("shortcut histogram {:?}", shortcut_hg);
 
-        println!("edge difference histogram {:?}", edge_diff_hg);*/
+        println!("edge difference histogram {:?}", edge_diff_hg);
+        
+        
+        let total_shortcuts = ch_algo.ch_precompute(&mut routing_graph);
+        time = now.elapsed().as_millis() as f32 * 0.001;
+        println!("precomp seconds: {}", time);
+        println!("total shortcuts: {}", total_shortcuts);
+
+        let mut shortest_path_costs = Vec::new();
+        let mut query_time = Vec::new();
+
+
+        for _ in 0..100 {
+            //1000
+            let source = routing_graph.get_random_node_id().unwrap();
+            let target = routing_graph.get_random_node_id().unwrap();
+            let now = Instant::now();
+            let result = ContractedGraph::bidirectional_compute(&mut routing_graph, source, target);
+            time = now.elapsed().as_millis() as f32 * 0.001;
+            query_time.push(time);
+            shortest_path_costs.push(result.0);
+        }
+
+        println!(
+            "average cost mm:ss {}:{}",
+            shortest_path_costs.iter().sum::<u64>() / shortest_path_costs.len() as u64 / 60,
+            shortest_path_costs.iter().sum::<u64>() / shortest_path_costs.len() as u64 % 60
+        );
+        println!(
+            "average query time in seconds {}",
+            query_time.iter().sum::<f32>() / query_time.len() as f32
+        );
         
     }
-
+    */
+    
+    
     /*
     #[test]
     fn dijkstras_test() {
@@ -953,64 +997,191 @@ mod tests {
             settled_nodes.iter().sum::<u64>() / settled_nodes.len() as u64
         );
     }*/
+  /*
+    #[test]
+    fn test() {
+        let _node0 = Node {
+            id: 0,
+            lat: 490000000,
+            lon: 65000000,
+        };
+        let node1 = Node {
+            id: 1,
+            lat: 491000000,
+            lon: 65100000,
+        };
+        let node2 = Node {
+            id: 2,
+            lat: 495000000,
+            lon: 70000000,
+        };
+        let node3 = Node {
+            id: 3,
+            lat: 493500000,
+            lon: 71250000,
+        };
+        let node4 = Node {
+            id: 4,
+            lat: 492500000,
+            lon: 72500000,
+        };
+        let node5 = Node {
+            id: 5,
+            lat: 497500000,
+            lon: 72500000,
+        };
+        let node6 = Node {
+            id: 6,
+            lat: 0, 
+            lon: 0
+        };
+        let node7 = Node {
+            id: 7,
+            lat: 0, 
+            lon: 0
+        };
+        let node8 = Node {
+            id: 8,
+            lat: 0, 
+            lon: 0
+        };
+        let node9 = Node {
+            id: 9,
+            lat: 0, 
+            lon: 0
+        };
+        let node10 = Node {
+            id: 10,
+            lat: 0, 
+            lon: 0
+        };
+        let node11 = Node {
+            id: 11,
+            lat: 0, 
+            lon: 0
+        };
+        let node12 = Node {
+            id: 12,
+            lat: 0, 
+            lon: 0
+        };
+        let node13 = Node {
+            id: 13,
+            lat: 0, 
+            lon: 0
+        };
+        //faithful recreation of Professor Bast's example graph from CH lecture 1 slide 16
+        let roads = RoadNetwork {
+            nodes: HashMap::from([ (1, node1), (2, node2), (3, node3), (4, node4), (5, node5), (6, node6), (7, node7), (8, node8), (9, node9), (10, node10), (11, node11), (12, node12), (13, node13)]),
+            edges: HashMap::from([
+                (1, HashMap::from([ (2, (3, false)), (13, (4, false)), (6, (7, false)) ])),
+                (2, HashMap::from([ (1, (3, false)), (8, (2, false)), (13, (5, false)) ])),
+                (3, HashMap::from([ (5, (5, false)), (12, (2, false)), (4, (4, false)) ])),
+                (4, HashMap::from([ (3, (4, false)), (12, (3, false)), (7, (4, false)) ])),
+                (5, HashMap::from([ (6, (6, false)), (11, (3, false)), (3, (5, false)) ])),
+                (6, HashMap::from([ (1, (7, false)), (10, (4, false)), (5, (6, false)) ])),
+                (7, HashMap::from([ (9, (7, false)), (11, (3, false)), (4, (4, false)) ])),
+                (8, HashMap::from([ (2, (2, false)), (13, (2, false)), (9, (5, false)) ])),
+                (9, HashMap::from([ (8, (5, false)), (10, (3, false)), (7, (7, false)) ])),
+                (10, HashMap::from([ (9, (3, false)), (11, (1, false)), (6, (4, false)), (13, (1, false)) ])),
+                (11, HashMap::from([ (7, (3, false)), (12, (1, false)), (5, (3, false)), (10, (1, false)) ])),
+                (12, HashMap::from([ (4, (3, false)), (3, (2, false)), (11, (1, false)) ])),
+                (13, HashMap::from([ (8, (2, false)), (10, (1, false)), (1, (4, false)), (2, (5, false)) ])),
+            ]),
+            raw_ways: vec![Way{id:0,speed:0, refs:vec![0,0]}],
+            raw_nodes: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+        };
+        let mut graph = Dijkstra::new(&roads);
+        let mut ch_algo = ContractedGraph::new();
+        graph.reset_all_flags(true);
 
-    /*
-        #[test]
-        fn test() {
-            let node0 = Node {
-                id: 0,
-                lat: 490000000,
-                lon: 65000000,
-            };
-            let node1 = Node {
-                id: 1,
-                lat: 491000000,
-                lon: 65100000,
-            };
-            let node2 = Node {
-                id: 2,
-                lat: 495000000,
-                lon: 70000000,
-            };
-            let node3 = Node {
-                id: 3,
-                lat: 493500000,
-                lon: 71250000,
-            };
-            let node4 = Node {
-                id: 4,
-                lat: 492500000,
-                lon: 72500000,
-            };
-            let node5 = Node {
-                id: 5,
-                lat: 497500000,
-                lon: 72500000,
-            };
-            let roads = RoadNetwork {
-                nodes: HashMap::from([ (0, node0), (1, node1), (2, node2), (3, node3), (4, node4), (5, node5)]),
-                edges: HashMap::from([
-                    (0, HashMap::from([(1, (5, false))])),
-                    (1, HashMap::from([(0, (5, false)), (2, (5, false))])),
-                    (2, HashMap::from([(1, (5, false)), (3, (5, false)), (4, (5, false))])),
-                    (3, HashMap::from([(2, (5, false)), (4, (5, false))])),
-                    (4, HashMap::from([(3, (5, false)), (5, (5, false)), (2, (5, false))])),
-                    (5, HashMap::from([(4, (5, false))])),
-                ]),
-                raw_ways: vec![Way{id:0,speed:0, refs:vec![0,0]}]
-            };
-            println!("Nodes: {}, Edges: {}", roads.nodes.len(), roads.edges.len());
-            let mut graph = Dijkstra::new(&roads);
-            let arc_flag_thing = ArcFlags::new(49.0, 49.2, 6.5, 6.52);
-            arc_flag_thing.arc_flags_precompute(&mut graph);
-            println!("roadnet {:?}", graph.graph.edges);
-            let source = 5;
-            let target = 0;
-            println!(
-                "\ndijiktra path and cost {:?}",
-                graph.dijkstra(source, target, &None, true)
-            );
-        }
-    */
+        println!("edge diff only{:?}", ch_algo.contract_node(10, &mut graph, true));
+        println!("contract node {:?}", ch_algo.contract_node(10, &mut graph, false));
 
+        //println!("total shortcuts: {}", ch_algo.ch_precompute(&mut graph));    }
+    
+
+6, 7, 8, 9, 10, 11, 12, 13]
+        };
+        let mut graph = Dijkstra::new(&roads);
+        let mut ch_algo = ContractedGraph::ne
+        graph.reset_all_flags(true);ue
+        println!("edge diff only{:?}", ch_algo.contract_node(10, &mut graph, true));e));
+        printlcontract node ode {: ch_algo.contract_node(10, &mut graph, false)ls
+);
+
+    //  //println!("total shortcuts: {}", ch_algo.ch_precompute(&mut graph));
+
+    }
+    
+
+6, 7, 8, 9, 10, 11, 12, 13]
+        };
+        let mut graph = Dijkstra::new(&roads);
+        let mut ch_algo = ContractedGraph::new();
+        graph.reset_all_flags(true);
+
+        println!("edge diff only{:?}", ch_algo.contract_node(10, &mut graph, true));
+        println!("contract node {:?}", ch_algo.contract_node(10, &mut graph, false));
+
+        //println!("total shortcuts: {}", ch_algo.ch_precompute(&mut graph));
+
+    }
+    
+
+6, 7, 8, 9, 10, 11, 12, 13]
+        };
+        let mut graph = Dijkstra::new(&roads);
+        let mut ch_algo = ContractedGraph::new();
+        graph.reset_all_flags(true);
+
+        println!("edge diff only{:?}", ch_algo.contract_node(10, &mut graph, true));
+        println!("contract node {:?}", ch_algo.contract_node(10, &mut graph, false));
+
+        //println!("total shortcuts: {}", ch_algo.ch_precompute(&mut graph));
+
+    }
+    
+
+6, 7, 8, 9, 10, 11, 12, 13]
+        };
+        let mut graph = Dijkstra::new(&roads);
+        let mut ch_algo = ContractedGraph::new();
+        graph.reset_all_flags(true);
+
+        println!("edge diff only{:?}", ch_algo.contract_node(10, &mut graph, true));
+        println!("contract node {:?}", ch_algo.contract_node(10, &mut graph, false));
+
+        //println!("total shortcuts: {}", ch_algo.ch_precompute(&mut graph));
+
+    }
+    
+
+, 8, 9, 10, 11, 12, 13]
+        };
+        let mut graph = Dijkstra::new(&roads);
+        let mut ch_algo = ContractedGraph::new();
+        graph.reset_all_flags(true);
+
+        println!("edge diff only{:?}", ch_algo.contract_node(10, &mut graph, true));
+        println!("contract node {:?}", ch_algo.contract_node(10, &mut graph, false));
+
+        //println!("total shortcuts: {}", ch_algo.ch_precompute(&mut graph));
+
+    }
+    
+
+}
+/
+}   };
+        let mut graph = Dijkstra::new(&roads);
+        let mut ch_algo = ContractedGraph::new();
+        graph.reset_all_flags(true);
+
+        println!("edge diff only{:?}", ch_algo.contract_node(10, &mut graph, true));
+        println!("contract node {:?}", ch_algo.contract_node(10, &mut graph, false));
+
+        //println!("total shortcuts: {}", ch_algo.ch_precompute(&mut graph));
+
+    } */
 }
