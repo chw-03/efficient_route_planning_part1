@@ -57,7 +57,6 @@ mod graph_construction {
         pub fn new(mut nodes: HashMap<i64, Node>, ways: Vec<Way>) -> Self {
             //init new RoadNetwork based on results from reading .pbf file
             let mut edges: HashMap<i64, HashMap<i64, (u64, bool)>> = HashMap::new();
-            //println!("# of ways {}", ways.len());
             for way in ways.clone() {
                 let mut previous_head_node_now_tail: Option<&Node> = None;
                 let mut previous_head_node_index: usize = 0;
@@ -369,9 +368,10 @@ mod routing {
             }
 
             let mut counter = 1;
+            let mut cost = 0;
             while !priority_queue.is_empty() {
                 let pathed_current_node = priority_queue.pop().unwrap().0 .1; //.0 "unwraps" from Reverse()
-                let cost = pathed_current_node.distance_from_start;
+                cost = pathed_current_node.distance_from_start;
                 let idx = pathed_current_node.node_self.id;
 
                 self.visited_nodes.insert(idx, cost);
@@ -397,6 +397,7 @@ mod routing {
                 for neighbor in self.get_neighbors(&pathed_current_node, consider_arc_flags) {
                     let temp_distance = pathed_current_node.distance_from_start + neighbor.1;
                     let next_distance = *gscore.get(&neighbor.0.id).unwrap_or(&MAX);
+
                     if temp_distance < next_distance {
                         gscore.insert(neighbor.0.id, temp_distance);
                         let prev_node: Rc<PathedNode> = Rc::new(pathed_current_node.clone());
@@ -417,9 +418,6 @@ mod routing {
                     }
                 }
                 counter += 1;
-            }
-            if consider_arc_flags {
-                //print!(" f{} ", counter);
             }
             (None, previous_nodes)
         }
@@ -689,13 +687,9 @@ mod contraction_hierarchies {
 
             let mut temp_shortcuts = HashMap::new();
             for (u, cost_uv) in costs_of_uv.iter() {
-                if self.ordered_nodes.contains_key(u) {
-                    continue;
-                }
                 graph.dijkstra(*u, -1, &None, true);
-                //println!("{:?}", graph.visited_nodes);
                 for (w, cost_vw) in costs_of_vw.iter() {
-                    if w == u || self.ordered_nodes.contains_key(w) {
+                    if w == u {
                         continue;
                     }
                     let path_via_uvw = cost_uv + cost_vw;
@@ -703,12 +697,12 @@ mod contraction_hierarchies {
                         .visited_nodes
                         .get(w)
                         .unwrap_or(temp_shortcuts.get(&(u, w)).unwrap_or(&MAX));
-                    //println!("node: {} to {}    dist: {} vs {}", u, w, dist_w, path_via_uvw);
-                    if dist_w > path_via_uvw {
+                    if dist_w > path_via_uvw
+                        && temp_shortcuts.insert((u, w), path_via_uvw).is_none()
+                        && temp_shortcuts.insert((w, u), path_via_uvw).is_none()
+                    {
                         edge_diff += 1;
                         num_shortcuts += 1;
-                        temp_shortcuts.insert((u, w), path_via_uvw);
-                        temp_shortcuts.insert((w, u), path_via_uvw);
                     }
                 }
             }
@@ -757,9 +751,11 @@ mod contraction_hierarchies {
 
             //step 2: contract all nodes in order of ed, recalculate heuristic --> Lazy
             //Lazy update: If current node does not have smallest ED, pick next, recompute its ED, repeat until find smallest
+            //Neighbours update: After each contraction, recompute EDs, but only for the neighbours of the contracted node
             let mut index = 0;
             while !priority_queue.is_empty() {
                 let (_, node_id) = priority_queue.pop().unwrap().0;
+                //if self.ordered_nodes.contains_key(&node_id) {continue;}
                 let (_, e_d) = self.contract_node(node_id, graph, true);
 
                 if !priority_queue.is_empty() {
@@ -773,19 +769,23 @@ mod contraction_hierarchies {
                 //establish contraction order
                 self.ordered_nodes.insert(node_id, index);
                 total_shortcuts += self.contract_node(node_id, graph, false).0 as u64;
+                //for (neighbor, _ ) in graph.graph.edges.get(&node_id).unwrap().clone() {
+                //    let new_e_d  = self.contract_node(neighbor, graph, true).1;
+                //    priority_queue.push(Reverse((new_e_d, node_id)));
+                //}
                 index += 1;
             }
             //step 3: reset arc flags, only flags of arc(u, v) with u.index < v.index == true
             graph.reset_all_flags(false);
-            for (v, edgelist) in graph.graph.edges.iter_mut() {
-                for (u, (_, flag)) in edgelist {
+            for (u, edgelist) in graph.graph.edges.iter_mut() {
+                for (v, (_, flag)) in edgelist {
                     if self.ordered_nodes.get(u) < self.ordered_nodes.get(v) {
                         *flag = true;
                     }
                 }
             }
             graph.set_max_settled_nodes(MAX);
-            graph.set_cost_upper_bound(MAX);
+            graph.set_cost_upper_bound(31536000);
             total_shortcuts
         }
 
@@ -798,6 +798,7 @@ mod contraction_hierarchies {
             let dist_source_to_u = graph.visited_nodes.clone();
             graph.dijkstra(target_id, source_id, &None, true);
             let dist_target_to_u = &graph.visited_nodes;
+
             let mut distances_s_t = Vec::new();
             for (u, dist_s) in dist_source_to_u {
                 if let Some(dist_t) = dist_target_to_u.get(&u) {
@@ -814,7 +815,7 @@ fn main() {}
 #[cfg(test)]
 mod tests {
     //use crate::arc_flags_algo::ArcFlags;
-    use crate::graph_construction::RoadNetwork;
+    use crate::graph_construction::*;
     //use crate::landmark_algo::*;
     use crate::contraction_hierarchies::*;
     use crate::routing::*;
@@ -829,8 +830,8 @@ mod tests {
         let path = "saarland.pbf";
         let data = RoadNetwork::read_from_osm_file(path).unwrap();
         let mut roads = RoadNetwork::new(data.0, data.1);
-        println!(
-            "{} Base Graph Nodes: {}, Edges: {}",
+        print!(
+            "{} Base Graph Nodes: {}, Edges: {}\t\t",
             path,
             roads.nodes.len(),
             roads.edges.len()
@@ -854,6 +855,7 @@ mod tests {
         let mut ch_algo = ContractedGraph::new();
         let now = Instant::now();
 
+        /*
         routing_graph.reset_all_flags(true);
         routing_graph.set_max_settled_nodes(20);
 
@@ -865,7 +867,6 @@ mod tests {
             let now = Instant::now();
             let (num_shortcut, num_edge_diff) = ch_algo.contract_node(n, &mut routing_graph, false);
             time = now.elapsed().as_micros() as f32;
-            //time here?
             contraction_time.push(time);
 
             if num_shortcut == 0 {
@@ -901,6 +902,9 @@ mod tests {
         println!("shortcut histogram {:?}", shortcut_hg);
 
         println!("edge difference histogram {:?}", edge_diff_hg);
+        */
+
+        routing_graph.reset_all_flags(true);
 
         let total_shortcuts = ch_algo.ch_precompute(&mut routing_graph);
         time = now.elapsed().as_millis() as f32 * 0.001;
@@ -910,7 +914,7 @@ mod tests {
         let mut shortest_path_costs = Vec::new();
         let mut query_time = Vec::new();
 
-        for _ in 0..1 {
+        for _ in 0..1000 {
             //1000
             let source = routing_graph.get_random_node_id().unwrap();
             let target = routing_graph.get_random_node_id().unwrap();
@@ -922,9 +926,10 @@ mod tests {
         }
 
         println!(
-            "average cost mm:ss {}:{}",
+            "average cost mm:ss {}:{} \n\t eg {}, {}, {}",
             shortest_path_costs.iter().sum::<u64>() / shortest_path_costs.len() as u64 / 60,
-            shortest_path_costs.iter().sum::<u64>() / shortest_path_costs.len() as u64 % 60
+            shortest_path_costs.iter().sum::<u64>() / shortest_path_costs.len() as u64 % 60,
+            shortest_path_costs.get(250).unwrap(), shortest_path_costs.get(500).unwrap(), shortest_path_costs.get(750).unwrap()
         );
         println!(
             "average query time in seconds {}",
@@ -1062,19 +1067,19 @@ mod tests {
         let roads = RoadNetwork {
             nodes: HashMap::from([ (1, node1), (2, node2), (3, node3), (4, node4), (5, node5), (6, node6), (7, node7), (8, node8), (9, node9), (10, node10), (11, node11), (12, node12), (13, node13)]),
             edges: HashMap::from([
-                (1, HashMap::from([ (2, (4, false)), (13, (1, false)), (6, (7, false)) ])),
-                (2, HashMap::from([ (1, (4, false)), (8, (2, false)), (13, (5, false)) ])),
+                (1, HashMap::from([ (2, (3, false)), (13, (4, false)), (6, (7, false)) ])),
+                (2, HashMap::from([ (1, (3, false)), (8, (2, false)), (13, (5, false)) ])),
                 (3, HashMap::from([ (5, (5, false)), (12, (2, false)), (4, (4, false)) ])),
                 (4, HashMap::from([ (3, (4, false)), (12, (3, false)), (7, (4, false)) ])),
-                (5, HashMap::from([ (6, (1, false)), (11, (3, false)), (3, (5, false)) ])),
-                (6, HashMap::from([ (1, (7, false)), (10, (4, false)), (5, (1, false)) ])),
+                (5, HashMap::from([ (6, (6, false)), (11, (3, false)), (3, (5, false)) ])),
+                (6, HashMap::from([ (1, (7, false)), (10, (4, false)), (5, (6, false)) ])),
                 (7, HashMap::from([ (9, (7, false)), (11, (3, false)), (4, (4, false)) ])),
                 (8, HashMap::from([ (2, (2, false)), (13, (2, false)), (9, (5, false)) ])),
                 (9, HashMap::from([ (8, (5, false)), (10, (3, false)), (7, (7, false)) ])),
                 (10, HashMap::from([ (9, (3, false)), (11, (1, false)), (6, (4, false)), (13, (1, false)) ])),
                 (11, HashMap::from([ (7, (3, false)), (12, (1, false)), (5, (3, false)), (10, (1, false)) ])),
                 (12, HashMap::from([ (4, (3, false)), (3, (2, false)), (11, (1, false)) ])),
-                (13, HashMap::from([ (8, (2, false)), (10, (1, false)), (1, (1, false)), (2, (5, false)) ])),
+                (13, HashMap::from([ (8, (2, false)), (10, (1, false)), (1, (4, false)), (2, (5, false)) ])),
             ]),
             raw_ways: vec![Way{id:0,speed:0, refs:vec![0,0]}],
             raw_nodes: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
@@ -1082,14 +1087,21 @@ mod tests {
         let mut graph = Dijkstra::new(&roads);
         let mut ch_algo = ContractedGraph::new();
         graph.reset_all_flags(true);
-        //println!("{:?}", graph.graph.edges);
 
         //(#shortcuts, edge difference = #shortcuts - arcs incident to node)
-        //println!("edge diff only{:?}", ch_algo.contract_node(8, &mut graph, true));
+        print!("edge diff only{:?}\t", ch_algo.contract_node(2, &mut graph, true));
 
-        //println!("contract node {:?}", ch_algo.contract_node(8, &mut graph, false));
+        print!("contract node {:?}\t", ch_algo.contract_node(2, &mut graph, false));
 
-        //println!("total shortcuts: {}", ch_algo.ch_precompute(&mut graph));
+        let mut graph = Dijkstra::new(&roads);
+        let mut ch_algo = ContractedGraph::new();
+        graph.reset_all_flags(true);
+
+        print!("total shortcuts: {}\n", ch_algo.ch_precompute(&mut graph));
+        print!("{:?}\n", graph.graph.edges);
+        print!("{:?}\n", ch_algo.ordered_nodes);
+        let result = ContractedGraph::bidirectional_compute(&mut graph, 1, 4);
+        print!("cost: {}    joint: {}\n", result.0, result.1);
     }
     */
 }
