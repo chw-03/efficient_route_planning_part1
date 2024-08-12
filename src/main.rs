@@ -216,9 +216,10 @@ mod routing {
     use rand::Rng;
     use std::cmp::Reverse;
     use std::collections::{BinaryHeap, HashMap, HashSet};
+    use std::hash::Hash;
+    use std::path;
     use std::rc::Rc;
     use std::time::Instant;
-    use std::u64::MAX;
 
     pub struct Dijkstra {
         //handle dijkstra calculations
@@ -228,7 +229,7 @@ mod routing {
         max_settled_nodes: u64,
     }
 
-    #[derive(Debug, PartialEq, Clone, Eq, PartialOrd, Ord)]
+    #[derive(Debug, PartialEq, Clone, Eq, PartialOrd, Ord, Hash)]
     pub struct PathedNode {
         //node that references parent nodes, used to create path from goal node to start node
         pub node_self: Node,
@@ -244,6 +245,7 @@ mod routing {
             let inner: PathedNode = Rc::unwrap_or_clone(last_elem);
             inner
         }
+
         pub fn get_path(self) -> (Vec<Node>, u64) {
             //uses reference to find the source node with parent_node == None
             let mut shortest_path: Vec<Node> = Vec::new();
@@ -286,8 +288,8 @@ mod routing {
             Self {
                 graph: graph.clone(),
                 visited_nodes,
-                cost_upper_bound: MAX,
-                max_settled_nodes: MAX,
+                cost_upper_bound: u64::MAX,
+                max_settled_nodes: u64::MAX,
             }
         }
 
@@ -390,13 +392,13 @@ mod routing {
                 }
 
                 //cost is higher than current path (not optimal)
-                if cost > *gscore.get(&idx).unwrap_or(&MAX) {
+                if cost > *gscore.get(&idx).unwrap_or(&u64::MAX) {
                     continue;
                 }
 
                 for neighbor in self.get_neighbors(&pathed_current_node, consider_arc_flags) {
                     let temp_distance = pathed_current_node.distance_from_start + neighbor.1;
-                    let next_distance = *gscore.get(&neighbor.0.id).unwrap_or(&MAX);
+                    let next_distance = *gscore.get(&neighbor.0.id).unwrap_or(&u64::MAX);
 
                     if temp_distance < next_distance {
                         gscore.insert(neighbor.0.id, temp_distance);
@@ -486,7 +488,104 @@ mod routing {
                 }
             }
         }
+
+        pub fn backtrace_dijkstra(
+            &mut self,
+            source_id: i64,
+            target_id: i64,
+            heuristics: &Option<HashMap<i64, u64>>,
+            consider_arc_flags: bool,
+        ) -> HashSet<PathedNode> {
+            //Heap(distance, node), Reverse turns binaryheap into minheap (default is maxheap)
+            let mut priority_queue: BinaryHeap<Reverse<(u64, PathedNode)>> = BinaryHeap::new();
+            let mut leaf_nodes: HashSet<PathedNode> = HashSet::new();
+    
+            //set target (-1) for all-node-settle rather than just target settle or smth
+            self.visited_nodes.clear();
+    
+            let source = *self
+                .graph
+                .nodes
+                .get(&source_id)
+                .unwrap_or_else(|| panic!("source node not found"));
+    
+            let source_node: PathedNode = PathedNode {
+                node_self: (source),
+                distance_from_start: 0,
+                parent_node: (None),
+            };
+    
+            let mut gscore: HashMap<i64, u64> = HashMap::new();
+            gscore.insert(source_id, 0);
+    
+            priority_queue.push(Reverse((0, source_node.clone())));
+    
+            let mut target: Node = Node {
+                id: 0,
+                lon: 0,
+                lat: 0,
+            };
+            if target_id > 0 {
+                target = *self
+                    .graph
+                    .nodes
+                    .get(&target_id)
+                    .unwrap_or_else(|| panic!("target node not found"));
+            }
+    
+            let mut counter = 1;
+            let mut cost = 0;
+            while !priority_queue.is_empty() {
+                let pathed_current_node = priority_queue.pop().unwrap().0 .1; //.0 "unwraps" from Reverse()
+                cost = pathed_current_node.distance_from_start;
+                let idx = pathed_current_node.node_self.id;
+    
+                self.visited_nodes.insert(idx, cost);
+    
+                //found target node
+                if idx.eq(&target_id) {
+                    return leaf_nodes;
+                }
+    
+                //cost is higher than current path (not optimal)
+                if cost > *gscore.get(&idx).unwrap_or(&u64::MAX) {
+                    continue;
+                }
+
+                let neighbors =  self.get_neighbors(&pathed_current_node, consider_arc_flags);
+
+                if neighbors.len() < 2 {
+                    leaf_nodes.insert(pathed_current_node.clone());
+                }
+    
+                for neighbor in neighbors {
+                    let temp_distance = pathed_current_node.distance_from_start + neighbor.1;
+                    let next_distance = *gscore.get(&neighbor.0.id).unwrap_or(&u64::MAX);
+    
+                    if temp_distance < next_distance {
+                        gscore.insert(neighbor.0.id, temp_distance);
+                        let prev_node: Rc<PathedNode> = Rc::new(pathed_current_node.clone());
+                        let tentative_new_node = PathedNode {
+                            node_self: neighbor.0,
+                            distance_from_start: temp_distance,
+                            parent_node: Some(prev_node),
+                        };
+                        let h;
+                        if let Some(heuristic) = heuristics {
+                            h = heuristic.get(&neighbor.0.id).unwrap_or(&0);
+                        } else {
+                            h = &0;
+                        }
+                        //fscore = temp_distance (gscore) + h (hscore)
+                        priority_queue.push(Reverse((temp_distance + h, tentative_new_node)));
+                    }
+                }
+                counter += 1;
+            }
+            leaf_nodes
+        }
     }
+    
 }
 
 #[allow(dead_code)]
@@ -611,7 +710,6 @@ mod arc_flags_algo {
 #[allow(dead_code)]
 mod contraction_hierarchies {
     use crate::routing::*;
-    use core::u64::MAX;
     use std::{
         cmp::Reverse,
         collections::{BinaryHeap, HashMap},
@@ -696,7 +794,7 @@ mod contraction_hierarchies {
                     let &dist_w = graph
                         .visited_nodes
                         .get(w)
-                        .unwrap_or(temp_shortcuts.get(&(u, w)).unwrap_or(&MAX));
+                        .unwrap_or(temp_shortcuts.get(&(u, w)).unwrap_or(&u64::MAX));
                     if dist_w > path_via_uvw
                         && temp_shortcuts.insert((u, w), path_via_uvw).is_none()
                         && temp_shortcuts.insert((w, u), path_via_uvw).is_none()
@@ -784,7 +882,7 @@ mod contraction_hierarchies {
                     }
                 }
             }
-            graph.set_max_settled_nodes(MAX);
+            graph.set_max_settled_nodes(u64::MAX);
             graph.set_cost_upper_bound(31536000);
             total_shortcuts
         }
@@ -810,6 +908,54 @@ mod contraction_hierarchies {
     }
 }
 
+#[allow(dead_code)]
+mod transit_node_routing {
+    use crate::{contraction_hierarchies::*, routing::*};
+    use std::collections::HashSet;
+
+    pub struct TransitNodes {
+        pub ordered_nodes: HashSet<i64>, //id, order number
+    }
+
+    impl TransitNodes {
+        pub fn new() -> TransitNodes {
+            TransitNodes {
+                ordered_nodes: HashSet::new(),
+            }
+        }
+
+        //uses contration hiearchies, will modify base graph
+        pub fn ch_based_precompute(
+            &mut self,
+            graph: &mut Dijkstra,
+            num_transit_nodes: u32,
+        ) -> HashSet<i64> {
+            //returns num_transit_nodes# of transit nodes
+            let mut ch_algo = ContractedGraph::new();
+            graph.reset_all_flags(true);
+            let _ = ch_algo.ch_precompute(graph);
+            let max_index: u32 = ch_algo.ordered_nodes.len().try_into().unwrap();
+            let result: HashSet<i64> = ch_algo
+                .ordered_nodes
+                .iter()
+                .filter(|(&id, &x)| x >= max_index - num_transit_nodes)
+                .map(|(&id, _)| id)
+                .collect();
+
+            graph.reset_all_flags(true); //might not need this line?
+
+            result
+        }
+
+        pub fn compute_access_nodes (node_id: i64, graph: &mut Dijkstra) -> Vec<i64> { //returns set access nodes for a given node by running dijktra w/ t = -1
+            let access_nodes: Vec<i64> = Vec::new();
+            let x = graph.backtrace_dijkstra(node_id, -1, &None, false);
+            println!("{:?}", x);
+            access_nodes
+        }
+
+    }
+}
 fn main() {}
 
 #[cfg(test)]
@@ -817,11 +963,77 @@ mod tests {
     //use crate::arc_flags_algo::ArcFlags;
     use crate::graph_construction::*;
     //use crate::landmark_algo::*;
-    use crate::contraction_hierarchies::*;
+    //use crate::contraction_hierarchies::*;
     use crate::routing::*;
+    use crate::transit_node_routing::*;
     //use std::collections::HashMap;
     use std::time::Instant;
 
+    #[test]
+    fn tnr_test() {
+        //std::env::set_var("RUST_BACKTRACE", "1");
+        //let path = "bw.pbf";
+        let path = "saarland.pbf";
+        let data = RoadNetwork::read_from_osm_file(path).unwrap();
+        let mut roads = RoadNetwork::new(data.0, data.1);
+        print!(
+            "{} Base Graph Nodes: {}, Edges: {}\t\t",
+            path,
+            roads.nodes.len(),
+            roads.edges.len()
+        );
+        let now = Instant::now();
+        roads = roads.reduce_to_largest_connected_component();
+        let mut time = now.elapsed().as_millis() as f32 * 0.001;
+        println!(
+            "time: {}, reduced map nodes: {}, edges: {}",
+            time,
+            roads.nodes.len(),
+            roads
+                .edges
+                .iter()
+                .map(|(_, edges)| edges.len())
+                .sum::<usize>()
+                / 2
+        );
+
+        let mut graph = Dijkstra::new(&roads);
+        let mut tnr = TransitNodes::new();
+        let now = Instant::now();
+
+        graph.reset_all_flags(true);
+
+        let _ = tnr.ch_based_precompute(&mut graph, 1000);
+        time = now.elapsed().as_millis() as f32 * 0.001;
+        println!("precomp seconds: {}", time);
+
+        let mut shortest_path_costs = Vec::new();
+        let mut query_time = Vec::new();
+
+        for _ in 0..1 {
+            let source_id = graph.get_random_node_id().unwrap();
+            let target_id = graph.get_random_node_id().unwrap();
+            let now = Instant::now();
+            let result = TransitNodes::compute_access_nodes(source_id, &mut graph);
+            let result = graph.dijkstra(source_id, target_id, &None, false);
+            time = now.elapsed().as_millis() as f32 * 0.001;
+            query_time.push(time);
+            shortest_path_costs.push(0);
+        }
+
+        println!(
+            "average cost mm:ss {}:{} \n",
+            shortest_path_costs.iter().sum::<u64>() / shortest_path_costs.len() as u64 / 60,
+            shortest_path_costs.iter().sum::<u64>() / shortest_path_costs.len() as u64 % 60,
+        );
+
+        println!(
+            "average query time in seconds {}",
+            query_time.iter().sum::<f32>() / query_time.len() as f32
+        );
+    }
+
+    /*
     #[test]
     fn contraction_hierarchies_test() {
         //std::env::set_var("RUST_BACKTRACE", "1");
@@ -851,21 +1063,21 @@ mod tests {
                 / 2
         );
 
-        let mut routing_graph = Dijkstra::new(&roads);
+        let mut graph = Dijkstra::new(&roads);
         let mut ch_algo = ContractedGraph::new();
         let now = Instant::now();
 
         /*
-        routing_graph.reset_all_flags(true);
-        routing_graph.set_max_settled_nodes(20);
+        graph.reset_all_flags(true);
+        graph.set_max_settled_nodes(20);
 
-        ch_algo.compute_random_node_ordering(&mut routing_graph, 1000); //here
+        ch_algo.compute_random_node_ordering(&mut graph, 1000); //here
         let mut contraction_time = Vec::new();
         let mut shortcut_hg = vec![0, 0, 0, 0, 0];
         let mut edge_diff_hg = vec![0, 0, 0, 0, 0];
         for (&n, _) in ch_algo.ordered_nodes.clone().iter() {
             let now = Instant::now();
-            let (num_shortcut, num_edge_diff) = ch_algo.contract_node(n, &mut routing_graph, false);
+            let (num_shortcut, num_edge_diff) = ch_algo.contract_node(n, &mut graph, false);
             time = now.elapsed().as_micros() as f32;
             contraction_time.push(time);
 
@@ -904,9 +1116,9 @@ mod tests {
         println!("edge difference histogram {:?}", edge_diff_hg);
         */
 
-        routing_graph.reset_all_flags(true);
+        graph.reset_all_flags(true);
 
-        let total_shortcuts = ch_algo.ch_precompute(&mut routing_graph);
+        let total_shortcuts = ch_algo.ch_precompute(&mut graph);
         time = now.elapsed().as_millis() as f32 * 0.001;
         println!("precomp seconds: {}", time);
         println!("total shortcuts: {}", total_shortcuts);
@@ -916,10 +1128,10 @@ mod tests {
 
         for _ in 0..1000 {
             //1000
-            let source = routing_graph.get_random_node_id().unwrap();
-            let target = routing_graph.get_random_node_id().unwrap();
+            let source = graph.get_random_node_id().unwrap();
+            let target = graph.get_random_node_id().unwrap();
             let now = Instant::now();
-            let result = ContractedGraph::bidirectional_compute(&mut routing_graph, source, target);
+            let result = ContractedGraph::bidirectional_compute(&mut graph, source, target);
             time = now.elapsed().as_millis() as f32 * 0.001;
             query_time.push(time);
             shortest_path_costs.push(result.0);
@@ -929,13 +1141,16 @@ mod tests {
             "average cost mm:ss {}:{} \n\t eg {}, {}, {}",
             shortest_path_costs.iter().sum::<u64>() / shortest_path_costs.len() as u64 / 60,
             shortest_path_costs.iter().sum::<u64>() / shortest_path_costs.len() as u64 % 60,
-            shortest_path_costs.get(250).unwrap(), shortest_path_costs.get(500).unwrap(), shortest_path_costs.get(750).unwrap()
+            shortest_path_costs.get(250).unwrap(),
+            shortest_path_costs.get(500).unwrap(),
+            shortest_path_costs.get(750).unwrap()
         );
         println!(
             "average query time in seconds {}",
             query_time.iter().sum::<f32>() / query_time.len() as f32
         );
     }
+    */
 
     /*
     #[test]
@@ -946,25 +1161,25 @@ mod tests {
         let mut settled_nodes = Vec::new();
         let heuristics = None;
 
-        //let precompute = landmark_heuristic_precompute(&mut routing_graph, 42);
+        //let precompute = landmark_heuristic_precompute(&mut graph, 42);
         let arc_flag_thing = ArcFlags::new(49.20, 49.25, 6.95, 7.05); //saar
         //let arc_flag_thing = ArcFlags::new(47.95, 48.05, 7.75, 7.90); //ba-wu
         //let arc_flag_thing = ArcFlags::new(33.63, 33.64, -117.84, -117.83); //uci
-        arc_flag_thing.arc_flags_precompute(&mut routing_graph);
+        arc_flag_thing.arc_flags_precompute(&mut graph);
         time = now.elapsed().as_millis() as f32 * 0.001;
         println!("pre done {} \n", time);
 
 
         for _ in 0..100 {
-            let source = routing_graph.get_random_node_id().unwrap();
-            //let target = routing_graph.get_random_node_id().unwrap();
-            let target = routing_graph.get_random_node_area_id(49.20, 49.25, 6.95, 7.05); //saar
-            //let target = routing_graph.get_random_node_area_id(47.95, 48.05, 7.75, 7.90); //ba-wu
-            //let target = routing_graph.get_random_node_area_id(33.63, 33.64, -117.84, -117.83); //uci
+            let source = graph.get_random_node_id().unwrap();
+            //let target = graph.get_random_node_id().unwrap();
+            let target = graph.get_random_node_area_id(49.20, 49.25, 6.95, 7.05); //saar
+            //let target = graph.get_random_node_area_id(47.95, 48.05, 7.75, 7.90); //ba-wu
+            //let target = graph.get_random_node_area_id(33.63, 33.64, -117.84, -117.83); //uci
             //heuristics = a_star_heuristic(&roads, target);
-            //heuristics = landmark_heuristic(&precompute, &routing_graph, target);
+            //heuristics = landmark_heuristic(&precompute, &graph, target);
             let now = Instant::now();
-            let result = routing_graph.dijkstra(source, target, &heuristics, true);
+            let result = graph.dijkstra(source, target, &heuristics, true);
             time = now.elapsed().as_millis() as f32 * 0.001;
             query_time.push(time);
 
@@ -973,7 +1188,7 @@ mod tests {
             } else {
                 shortest_path_costs.push(0);
             }
-            settled_nodes.push(routing_graph.visited_nodes.len() as u64);
+            settled_nodes.push(graph.visited_nodes.len() as u64);
         }
 
         println!(
