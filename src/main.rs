@@ -553,16 +553,16 @@ mod routing {
                     let temp_distance = pathed_current_node.distance_from_start + neighbor.1;
                     let next_distance = *gscore.get(&neighbor.0.id).unwrap_or(&u64::MAX);
 
-                    let prev_node: Rc<PathedNode> = Rc::new(pathed_current_node.clone());
-                    let tentative_new_node = PathedNode {
-                        node_self: neighbor.0,
-                        distance_from_start: temp_distance,
-                        parent_node: Some(prev_node),
-                    };
-                    v_nodes.insert(tentative_new_node.clone());
-
                     if temp_distance < next_distance {
                         gscore.insert(neighbor.0.id, temp_distance);
+                        let prev_node: Rc<PathedNode> = Rc::new(pathed_current_node.clone());
+                        let tentative_new_node = PathedNode {
+                            node_self: neighbor.0,
+                            distance_from_start: temp_distance,
+                            parent_node: Some(prev_node),
+                        };
+                        v_nodes.insert(tentative_new_node.clone());
+
                         let h;
                         if let Some(heuristic) = heuristics {
                             h = heuristic.get(&neighbor.0.id).unwrap_or(&0);
@@ -901,87 +901,128 @@ mod contraction_hierarchies {
 #[allow(dead_code)]
 mod transit_node_routing {
     use crate::{contraction_hierarchies::*, routing::*};
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
 
-    pub struct TransitNodes {
-        pub ordered_nodes: HashSet<i64>, //id, order number
+    //uses contration hiearchies, will modify base graph
+    pub fn ch_based_precompute(graph: &mut Dijkstra, num_transit_nodes: u32) -> HashSet<i64> {
+        //returns num_transit_nodes# of transit nodes
+        let mut ch_algo = ContractedGraph::new();
+        graph.reset_all_flags(true);
+        let _ = ch_algo.ch_precompute(graph);
+        let max_index: u32 = ch_algo.ordered_nodes.len().try_into().unwrap();
+        let result: HashSet<i64> = ch_algo
+            .ordered_nodes
+            .iter()
+            .filter(|(&_, &x)| x >= max_index - num_transit_nodes)
+            .map(|(&id, _)| id)
+            .collect();
+
+        graph.reset_all_flags(true); //might not need this line?
+
+        result
     }
 
-    impl TransitNodes {
-        pub fn new() -> TransitNodes {
-            TransitNodes {
-                ordered_nodes: HashSet::new(),
-            }
-        }
+    pub fn compute_access_nodes(
+        node_id: i64,
+        graph: &mut Dijkstra,
+        transit_nodes: &HashSet<i64>,
+    ) -> HashSet<i64> {
+        //returns set access nodes for a given node by running dijktra w/ t = -1
+        let mut access_nodes: HashSet<i64> = HashSet::new();
+        let node_paths = graph.backtrace_dijkstra(node_id, -1, &None, false);
+        let mut visted_nodes = HashSet::new();
 
-        //uses contration hiearchies, will modify base graph
-        pub fn ch_based_precompute(
-            &mut self,
-            graph: &mut Dijkstra,
-            num_transit_nodes: u32,
-        ) -> HashSet<i64> {
-            //returns num_transit_nodes# of transit nodes
-            let mut ch_algo = ContractedGraph::new();
-            graph.reset_all_flags(true);
-            let _ = ch_algo.ch_precompute(graph);
-            let max_index: u32 = ch_algo.ordered_nodes.len().try_into().unwrap();
-            let result: HashSet<i64> = ch_algo
-                .ordered_nodes
-                .iter()
-                .filter(|(&_, &x)| x >= max_index - num_transit_nodes)
-                .map(|(&id, _)| id)
-                .collect();
+        for v_node in node_paths {
+            //println!("new path");
+            let path = v_node.get_path().0; //lists nodes from t -> s
+            let mut path_access_node = None;
+            for node in path {
+                //print!("\t {}", node.id);
 
-            graph.reset_all_flags(true); //might not need this line?
-
-            result
-        }
-
-        pub fn compute_access_nodes(
-            node_id: i64,
-            graph: &mut Dijkstra,
-            transit_nodes: &HashSet<i64>,
-        ) -> HashSet<i64> {
-            //returns set access nodes for a given node by running dijktra w/ t = -1
-            let mut access_nodes: HashSet<i64> = HashSet::new();
-            let node_paths = graph.backtrace_dijkstra(node_id, -1, &None, false);
-            let mut visted_nodes = HashSet::new();
-            let mut abandon_path = false;
-            for v_node in node_paths {
-                //println!("new path {:?}", v_node);
-                let path = v_node.get_path().0;
-                let mut path_access_node = None;
-                for node in path {
-                    //println!("\t {}", node.id);
-                    if !visted_nodes.insert(node.id) {
-                        abandon_path = true;
-                        break;
-                    }
-                    if transit_nodes.contains(&node.id) {
-                        path_access_node = Some(node.id);
-                    }
-                }
-                if abandon_path {
+                if transit_nodes.contains(&node.id) && !access_nodes.contains(&node_id) {
+                    path_access_node = Some(node.id);
+                    visted_nodes.insert(node_id);
+                    //print!("a");
                     continue;
                 }
-                if let Some(id) = path_access_node {
-                    //println!("\t added {}", id);
-                    access_nodes.insert(id);
+
+                //if node has been visted before, stop looking for transit nodes
+                if !visted_nodes.insert(node.id) {
+                    //println!("b");
+                    break;
                 }
             }
-            access_nodes
+
+            //save transit node closest to source
+            if let Some(id) = path_access_node {
+                //println!("\t added {}", id);
+                access_nodes.insert(id);
+            }
+        }
+        access_nodes
+    }
+
+    //Gives set of distances between source node and its access nodes
+    //let U be access nodes of source while V is access nodes of target
+    pub fn access_node_distance_generator(
+        source_id: i64,
+        target_id: i64,
+        access_nodes: HashSet<i64>,
+        graph: &mut Dijkstra,
+    ) -> (
+        HashMap<i64, u64>,
+        HashMap<i64, u64>,
+        HashMap<(i64, i64), u64>,
+    ) {
+        let mut dist_s_u = HashMap::new(); //u, cost
+        let mut dist_u_v = HashMap::new(); //(u, v), cost
+        let mut dist_v_t = HashMap::new(); //v, cost
+
+        for u in access_nodes.clone() {
+            let result = graph.dijkstra(source_id, u, &None, false).0;
+            if let Some(cost) = result {
+                dist_s_u.insert(u, cost.distance_from_start);
+            }
         }
 
-        //pub fn access_node_distance_generator(source_id: i64, access_nodes: HashSet<i64>) {
+        for v in access_nodes.clone() {
+            let result = graph.dijkstra(v, target_id, &None, false).0;
+            if let Some(cost) = result {
+                dist_v_t.insert(v, cost.distance_from_start);
+            }
 
-        //}
+            for u in access_nodes.clone() {
+                let result = graph.dijkstra(u, v, &None, false).0;
+                if let Some(cost) = result {
+                    dist_u_v.insert((u, v), cost.distance_from_start);
+                }
+            }
+        }
 
-        // Compute the shortest path by trying all combinations of access nodes
-        //pub fn compute_shortest_path_tnr(source_id: i64, target: i64) {
+        (dist_s_u, dist_v_t, dist_u_v)
+    }
 
-        //}
+    // Compute the shortest path by trying all combinations of access nodes
+    pub fn compute_shortest_path_tnr(
+        distance_sets: (
+            HashMap<i64, u64>,
+            HashMap<i64, u64>,
+            HashMap<(i64, i64), u64>,
+        ) ) -> u64 {
+        let mut best_combo = u64::MAX;
+        for ((u, v), u_v_cost) in distance_sets.2 {
+            let new_combo = distance_sets.0.get(&u).unwrap_or(&u64::MAX)
+                + distance_sets.1.get(&v).unwrap_or(&u64::MAX)
+                + u_v_cost;
+            if new_combo < best_combo {
+                best_combo = new_combo;
+            }
+        }
+
+        best_combo
     }
 }
+
 fn main() {}
 
 #[cfg(test)]
@@ -992,8 +1033,9 @@ mod tests {
     //use crate::contraction_hierarchies::*;
     use crate::routing::*;
     use crate::transit_node_routing::*;
-    //use std::collections::{HashMap, HashSet};
+    //use std::collections::HashMap;
     use std::time::Instant;
+
 
     #[test]
     fn tnr_test() {
@@ -1024,57 +1066,59 @@ mod tests {
         );
 
         let mut graph = Dijkstra::new(&roads);
-        let mut tnr = TransitNodes::new();
         let now = Instant::now();
+
+        //println!("a{}", graph.get_random_node_id().unwrap());
 
         graph.reset_all_flags(true);
 
-        let transit_nodes = tnr.ch_based_precompute(&mut graph, 1000);
+        let transit_nodes = ch_based_precompute(&mut graph, 1000);
         time = now.elapsed().as_millis() as f32 * 0.001;
         println!("precomp seconds: {}", time);
 
         let mut access_node_time = Vec::new();
         let mut num_access_nodes = Vec::new();
-        //let mut query_time = Vec::new();
-        //let mut shortest_path_costs = Vec::new();
+        let mut query_time = Vec::new();
+        let mut shortest_path_costs = Vec::new();
 
-        for _ in 0..1000 {
+        for x in 0..1 {
+
             let source_id = graph.get_random_node_id().unwrap();
-            //let target_id = graph.get_random_node_id().unwrap();
+            let target_id = graph.get_random_node_id().unwrap();
+            print!("{}\t s: {}, t: {} \n", x, source_id, target_id);
+            //let source_id = 268423709;
 
             let now = Instant::now();
-            let access_nodes =
-                TransitNodes::compute_access_nodes(source_id, &mut graph, &transit_nodes);
-            time = now.elapsed().as_millis() as f32 * 0.001;
-            num_access_nodes.push(access_nodes.len());
+            let mut source_access = compute_access_nodes(source_id, &mut graph, &transit_nodes);
+            let target_access = compute_access_nodes(target_id, &mut graph, &transit_nodes);
+            time = now.elapsed().as_millis() as f32;
             access_node_time.push(time);
+            num_access_nodes.push(source_access.len());
 
-            /*
-            let now = Instant::now();
-            let result = graph.dijkstra(source_id, target_id, &None, false);
-            time = now.elapsed().as_millis() as f32 * 0.001;
-            if let Some(cost) = result.0 {
-                shortest_path_costs.push(cost.get_path().1);
-            } else {
-                shortest_path_costs.push(0);
-            }
+            time = now.elapsed().as_micros() as f32;
             query_time.push(time);
-            */
+            println!("n:  {:?}\t", source_access.len());
+            let _ = target_access.into_iter().map(|x| source_access.insert(x));
+            print!("x");
+            let distance_sets = access_node_distance_generator(source_id, target_id, source_access, &mut graph);
+            let result = compute_shortest_path_tnr(distance_sets);
+            shortest_path_costs.push(result);
+            
         }
 
         println!(
-            "average access node time in seconds {}",
+            "\naverage access node time in seconds {}",
             access_node_time.iter().sum::<f32>() / access_node_time.len() as f32
         );
         //1-9 milis
 
         println!(
-            "number of access nodes per node {}",
+            "average number of access nodes per node {}",
             num_access_nodes.iter().sum::<usize>() / num_access_nodes.len()
         );
         //5-12
 
-        /*
+        
         println!(
             "average query time in seconds {}",
             query_time.iter().sum::<f32>() / query_time.len() as f32
@@ -1087,8 +1131,9 @@ mod tests {
             shortest_path_costs.iter().sum::<u64>() / shortest_path_costs.len() as u64 % 60,
         );
         //20-35 mins saar or 80-90 bawu
-        */
+        
     }
+    
 
     /*
     #[test]
@@ -1395,7 +1440,7 @@ mod tests {
             nodes: HashMap::from([ (0, node0), (1, node1), (2, node2), (3, node3), (4, node4), (5, node5), (6, node6), (7, node7), (8, node8), (9, node9)]),
             edges: HashMap::from([
                 (0, HashMap::from([ (1, (3, false)) ])),
-                (1, HashMap::from([ (0, (3, false)), (2, (3, false)), (3, (3, false)), (8, (3, false)) ])),
+                (1, HashMap::from([ (2, (3, false)), (3, (3, false)), (8, (3, false)), (0, (3, false)) ])),
                 (2, HashMap::from([ (1, (3, false)), (4, (3, false)), (5, (3, false)) ])),
                 (3, HashMap::from([ (1, (3, false)), (6, (3, false)), (7, (3, false)) ])),
                 (4, HashMap::from([ (2, (3, false)) ])),
@@ -1406,26 +1451,30 @@ mod tests {
                 (9, HashMap::from([ (8, (3, false)) ]))
             ]),
             raw_ways: vec![Way{id:0,speed:0, refs:vec![0,0]}],
-            raw_nodes: HashSet::from([1, 2, 3, 4, 5, 6, 7, 8, 9]).into_iter().collect::<Vec<i64>>()
+            raw_nodes: vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
         };
 
         let mut graph = Dijkstra::new(&roads);
-        let mut tnr = TransitNodes::new();
 
         graph.reset_all_flags(true);
-        let transit_nodes = tnr.ch_based_precompute(&mut graph, 4);
+        let transit_nodes = ch_based_precompute(&mut graph, 3);
+        //let transit_nodes = HashSet::from([2, 3, 8]);
+        println!("{:?}", transit_nodes);
 
-        let mut shortest_path_costs = Vec::new();
         for _ in 0..1 {
             let source_id = graph.get_random_node_id().unwrap();
-            println!("source:  {}", source_id);
-            //let target_id = graph.get_random_node_id().unwrap();
-            let access_nodes = TransitNodes::compute_access_nodes(source_id, &mut graph, &transit_nodes);
-            println!("access nodes:  {:?}", access_nodes);
-            //let result = graph.dijkstra(source_id, target_id, &None, false);
-            shortest_path_costs.push(0);
+            let target_id = graph.get_random_node_id().unwrap();
+            println!("s: {}, t: {}", source_id, target_id);
+            let access_nodes = compute_access_nodes(source_id, &mut graph, &transit_nodes);
+            print!("n:  {:?}\t", access_nodes);
+            let distance_sets = access_node_distance_generator(source_id, target_id, access_nodes, &mut graph);
+            let result = compute_shortest_path_tnr(distance_sets);
+
+            println!("{}", result)
         }
 
     }
     */
+    
+    
 }
